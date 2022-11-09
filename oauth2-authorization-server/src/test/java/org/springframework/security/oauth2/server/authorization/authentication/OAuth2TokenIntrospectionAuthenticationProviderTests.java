@@ -22,8 +22,8 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
@@ -31,10 +31,10 @@ import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.OAuth2RefreshToken;
-import org.springframework.security.oauth2.core.OAuth2TokenIntrospection;
 import org.springframework.security.oauth2.core.OAuth2TokenIntrospectionClaimNames;
 import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenIntrospection;
 import org.springframework.security.oauth2.server.authorization.TestOAuth2Authorizations;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
@@ -61,7 +61,7 @@ public class OAuth2TokenIntrospectionAuthenticationProviderTests {
 	private OAuth2AuthorizationService authorizationService;
 	private OAuth2TokenIntrospectionAuthenticationProvider authenticationProvider;
 
-	@Before
+	@BeforeEach
 	public void setUp() {
 		this.registeredClientRepository = mock(RegisteredClientRepository.class);
 		this.authorizationService = mock(OAuth2AuthorizationService.class);

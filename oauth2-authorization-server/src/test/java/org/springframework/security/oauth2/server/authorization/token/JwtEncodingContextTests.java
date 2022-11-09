@@ -15,19 +15,19 @@
  */
 package org.springframework.security.oauth2.server.authorization.token;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
-import org.springframework.security.oauth2.core.OAuth2TokenType;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.TestJwsHeaders;
 import org.springframework.security.oauth2.jwt.TestJwtClaimsSets;
 import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.TestOAuth2Authorizations;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationGrantAuthenticationToken;
@@ -46,10 +46,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class JwtEncodingContextTests {
 
 	@Test
-	public void withWhenHeadersNullThenThrowIllegalArgumentException() {
+	public void withWhenJwsHeaderNullThenThrowIllegalArgumentException() {
 		assertThatThrownBy(() -> JwtEncodingContext.with(null, TestJwtClaimsSets.jwtClaimsSet()))
 				.isInstanceOf(IllegalArgumentException.class)
-				.hasMessage("headersBuilder cannot be null");
+				.hasMessage("jwsHeaderBuilder cannot be null");
 	}
 
 	@Test
@@ -105,7 +105,7 @@ public class JwtEncodingContextTests {
 				.context(ctx -> ctx.put("custom-key-2", "custom-value-2"))
 				.build();
 
-		assertThat(context.getHeaders()).isEqualTo(headers);
+		assertThat(context.getJwsHeader()).isEqualTo(headers);
 		assertThat(context.getClaims()).isEqualTo(claims);
 		assertThat(context.getRegisteredClient()).isEqualTo(registeredClient);
 		assertThat(context.<Authentication>getPrincipal()).isEqualTo(principal);

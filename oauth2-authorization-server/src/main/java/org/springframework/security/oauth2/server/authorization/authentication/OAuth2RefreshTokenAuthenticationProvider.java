@@ -32,15 +32,15 @@ import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.OAuth2RefreshToken;
 import org.springframework.security.oauth2.core.OAuth2Token;
-import org.springframework.security.oauth2.core.OAuth2TokenType;
 import org.springframework.security.oauth2.core.oidc.OidcIdToken;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.core.oidc.endpoint.OidcParameterNames;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
-import org.springframework.security.oauth2.server.authorization.context.ProviderContextHolder;
+import org.springframework.security.oauth2.server.authorization.context.AuthorizationServerContextHolder;
 import org.springframework.security.oauth2.server.authorization.token.DefaultOAuth2TokenContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
@@ -118,7 +118,7 @@ public final class OAuth2RefreshTokenAuthenticationProvider implements Authentic
 		// The requested scope MUST NOT include any scope not originally granted by the resource owner,
 		// and if omitted is treated as equal to the scope originally granted by the resource owner.
 		Set<String> scopes = refreshTokenAuthentication.getScopes();
-		Set<String> authorizedScopes = authorization.getAttribute(OAuth2Authorization.AUTHORIZED_SCOPE_ATTRIBUTE_NAME);
+		Set<String> authorizedScopes = authorization.getAuthorizedScopes();
 		if (!authorizedScopes.containsAll(scopes)) {
 			throw new OAuth2AuthenticationException(OAuth2ErrorCodes.INVALID_SCOPE);
 		}
@@ -130,7 +130,7 @@ public final class OAuth2RefreshTokenAuthenticationProvider implements Authentic
 		DefaultOAuth2TokenContext.Builder tokenContextBuilder = DefaultOAuth2TokenContext.builder()
 				.registeredClient(registeredClient)
 				.principal(authorization.getAttribute(Principal.class.getName()))
-				.providerContext(ProviderContextHolder.getProviderContext())
+				.authorizationServerContext(AuthorizationServerContextHolder.getContext())
 				.authorization(authorization)
 				.authorizedScopes(scopes)
 				.authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)

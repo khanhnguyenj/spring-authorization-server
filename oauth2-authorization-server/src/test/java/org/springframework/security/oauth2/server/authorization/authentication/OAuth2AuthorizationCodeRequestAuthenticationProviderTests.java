@@ -18,41 +18,36 @@ package org.springframework.security.oauth2.server.authorization.authentication;
 import java.security.Principal;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
-import org.springframework.security.oauth2.core.OAuth2AuthorizationCode;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
-import org.springframework.security.oauth2.core.OAuth2TokenType;
-import org.springframework.security.oauth2.core.authentication.OAuth2AuthenticationValidator;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationResponseType;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.core.endpoint.PkceParameterNames;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationCode;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsent;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
-import org.springframework.security.oauth2.server.authorization.TestOAuth2Authorizations;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.TestRegisteredClients;
-import org.springframework.security.oauth2.server.authorization.config.ClientSettings;
-import org.springframework.security.oauth2.server.authorization.config.ProviderSettings;
-import org.springframework.security.oauth2.server.authorization.context.ProviderContext;
-import org.springframework.security.oauth2.server.authorization.context.ProviderContextHolder;
+import org.springframework.security.oauth2.server.authorization.context.AuthorizationServerContextHolder;
+import org.springframework.security.oauth2.server.authorization.context.TestAuthorizationServerContext;
+import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,8 +55,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -72,14 +65,15 @@ import static org.mockito.Mockito.when;
  * @author Steve Riesenberg
  */
 public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
-	private static final OAuth2TokenType STATE_TOKEN_TYPE = new OAuth2TokenType(OAuth2ParameterNames.STATE);
+	private static final String AUTHORIZATION_URI = "https://provider.com/oauth2/authorize";
+	private static final String STATE = "state";
 	private RegisteredClientRepository registeredClientRepository;
 	private OAuth2AuthorizationService authorizationService;
 	private OAuth2AuthorizationConsentService authorizationConsentService;
 	private OAuth2AuthorizationCodeRequestAuthenticationProvider authenticationProvider;
 	private TestingAuthenticationToken principal;
 
-	@Before
+	@BeforeEach
 	public void setUp() {
 		this.registeredClientRepository = mock(RegisteredClientRepository.class);
 		this.authorizationService = mock(OAuth2AuthorizationService.class);
@@ -88,8 +82,8 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 				this.registeredClientRepository, this.authorizationService, this.authorizationConsentService);
 		this.principal = new TestingAuthenticationToken("principalName", "password");
 		this.principal.setAuthenticated(true);
-		ProviderSettings providerSettings = ProviderSettings.builder().issuer("https://provider.com").build();
-		ProviderContextHolder.setProviderContext(new ProviderContext(providerSettings, null));
+		AuthorizationServerSettings authorizationServerSettings = AuthorizationServerSettings.builder().issuer("https://provider.com").build();
+		AuthorizationServerContextHolder.setContext(new TestAuthorizationServerContext(authorizationServerSettings, null));
 	}
 
 	@Test
@@ -129,25 +123,19 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 	}
 
 	@Test
-	public void setAuthenticationValidatorResolverWhenNullThenThrowIllegalArgumentException() {
-		assertThatThrownBy(() -> this.authenticationProvider.setAuthenticationValidatorResolver(null))
+	public void setAuthenticationValidatorWhenNullThenThrowIllegalArgumentException() {
+		assertThatThrownBy(() -> this.authenticationProvider.setAuthenticationValidator(null))
 				.isInstanceOf(IllegalArgumentException.class)
-				.hasMessage("authenticationValidatorResolver cannot be null");
-	}
-
-	@Test
-	public void setAuthorizationConsentCustomizerWhenNullThenThrowIllegalArgumentException() {
-		assertThatThrownBy(() -> this.authenticationProvider.setAuthorizationConsentCustomizer(null))
-				.isInstanceOf(IllegalArgumentException.class)
-				.hasMessage("authorizationConsentCustomizer cannot be null");
+				.hasMessage("authenticationValidator cannot be null");
 	}
 
 	@Test
 	public void authenticateWhenInvalidClientIdThenThrowOAuth2AuthorizationCodeRequestAuthenticationException() {
 		RegisteredClient registeredClient = TestRegisteredClients.registeredClient().build();
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), null);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -163,9 +151,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.redirectUri("https:///invalid")
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						"https:///invalid", STATE, registeredClient.getScopes(), null);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -181,9 +169,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.redirectUri("https://example.com#fragment")
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						"https://example.com#fragment", STATE, registeredClient.getScopes(), null);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -199,9 +187,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.redirectUri("https://localhost:5000")
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						"https://localhost:5000", STATE, registeredClient.getScopes(), null);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -219,9 +207,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.redirectUri("https://invalid-example.com")
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						"https://invalid-example.com", STATE, registeredClient.getScopes(), null);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -239,9 +227,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.redirectUri("https://127.0.0.1:5000")
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						"https://127.0.0.1:5000", STATE, registeredClient.getScopes(), null);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
 				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
@@ -258,9 +246,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.redirectUri("https://[::1]:5000")
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						"https://[::1]:5000", STATE, registeredClient.getScopes(), null);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
 				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
@@ -274,9 +262,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.redirectUri(null)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						null, STATE, registeredClient.getScopes(), null);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -294,9 +282,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.redirectUri(null)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						null, STATE, registeredClient.getScopes(), null);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -314,8 +302,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), null);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -331,9 +320,10 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.scopes(Collections.singleton("invalid-scope"))
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE,
+						Collections.singleton("invalid-scope"), null);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -350,8 +340,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), null);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -369,9 +360,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		additionalParameters.put(PkceParameterNames.CODE_CHALLENGE, "code-challenge");
 		additionalParameters.put(PkceParameterNames.CODE_CHALLENGE_METHOD, "unsupported");
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.additionalParameters(additionalParameters)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), additionalParameters);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -389,9 +380,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		Map<String, Object> additionalParameters = new HashMap<>();
 		additionalParameters.put(PkceParameterNames.CODE_CHALLENGE, "code-challenge");
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.additionalParameters(additionalParameters)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), additionalParameters);
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
 				.satisfies(ex ->
@@ -408,8 +399,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		this.principal.setAuthenticated(false);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), null);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
 				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
@@ -427,11 +419,12 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 				.thenReturn(registeredClient);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), null);
 
-		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
-				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
+		OAuth2AuthorizationConsentAuthenticationToken authenticationResult =
+				(OAuth2AuthorizationConsentAuthenticationToken) this.authenticationProvider.authenticate(authentication);
 
 		ArgumentCaptor<OAuth2Authorization> authorizationCaptor = ArgumentCaptor.forClass(OAuth2Authorization.class);
 		verify(this.authorizationService).save(authorizationCaptor.capture());
@@ -460,8 +453,6 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		assertThat(authenticationResult.getAuthorizationUri()).isEqualTo(authorizationRequest.getAuthorizationUri());
 		assertThat(authenticationResult.getScopes()).isEmpty();
 		assertThat(authenticationResult.getState()).isEqualTo(state);
-		assertThat(authenticationResult.isConsentRequired()).isTrue();
-		assertThat(authenticationResult.getAuthorizationCode()).isNull();
 		assertThat(authenticationResult.isAuthenticated()).isTrue();
 	}
 
@@ -478,8 +469,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 				.thenReturn(registeredClient);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), null);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
 				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
@@ -503,8 +495,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 				.thenReturn(previousAuthorizationConsent);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), null);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
 				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
@@ -522,9 +515,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		additionalParameters.put(PkceParameterNames.CODE_CHALLENGE, "code-challenge");
 		additionalParameters.put(PkceParameterNames.CODE_CHALLENGE_METHOD, "S256");
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.additionalParameters(additionalParameters)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), additionalParameters);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
 				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
@@ -543,8 +536,9 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		this.authenticationProvider.setAuthorizationCodeGenerator(authorizationCodeGenerator);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), null);
 
 		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
 				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
@@ -556,28 +550,26 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 	}
 
 	@Test
-	public void authenticateWhenCustomAuthenticationValidatorResolverThenUsed() {
+	public void authenticateWhenCustomAuthenticationValidatorThenUsed() {
 		RegisteredClient registeredClient = TestRegisteredClients.registeredClient().build();
 		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
 				.thenReturn(registeredClient);
 
 		@SuppressWarnings("unchecked")
-		Function<String, OAuth2AuthenticationValidator> authenticationValidatorResolver = mock(Function.class);
-		this.authenticationProvider.setAuthenticationValidatorResolver(authenticationValidatorResolver);
+		Consumer<OAuth2AuthorizationCodeRequestAuthenticationContext> authenticationValidator = mock(Consumer.class);
+		this.authenticationProvider.setAuthenticationValidator(authenticationValidator);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationCodeRequestAuthentication(registeredClient, this.principal)
-						.build();
+				new OAuth2AuthorizationCodeRequestAuthenticationToken(
+						AUTHORIZATION_URI, registeredClient.getClientId(), principal,
+						registeredClient.getRedirectUris().iterator().next(), STATE, registeredClient.getScopes(), null);
 
 		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
 				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
 
 		assertAuthorizationCodeRequestWithAuthorizationCodeResult(registeredClient, authentication, authenticationResult);
 
-		ArgumentCaptor<String> parameterNameCaptor = ArgumentCaptor.forClass(String.class);
-		verify(authenticationValidatorResolver, times(2)).apply(parameterNameCaptor.capture());
-		assertThat(parameterNameCaptor.getAllValues()).containsExactly(
-				OAuth2ParameterNames.REDIRECT_URI, OAuth2ParameterNames.SCOPE);
+		verify(authenticationValidator).accept(any());
 	}
 
 	private void assertAuthorizationCodeRequestWithAuthorizationCodeResult(
@@ -605,7 +597,7 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		assertThat(authorization.<Authentication>getAttribute(Principal.class.getName())).isEqualTo(this.principal);
 
 		OAuth2Authorization.Token<OAuth2AuthorizationCode> authorizationCode = authorization.getToken(OAuth2AuthorizationCode.class);
-		Set<String> authorizedScopes = authorization.getAttribute(OAuth2Authorization.AUTHORIZED_SCOPE_ATTRIBUTE_NAME);
+		Set<String> authorizedScopes = authorization.getAuthorizedScopes();
 
 		assertThat(authenticationResult.getClientId()).isEqualTo(registeredClient.getClientId());
 		assertThat(authenticationResult.getPrincipal()).isEqualTo(this.principal);
@@ -615,414 +607,6 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		assertThat(authenticationResult.getState()).isEqualTo(authorizationRequest.getState());
 		assertThat(authenticationResult.getAuthorizationCode()).isEqualTo(authorizationCode.getToken());
 		assertThat(authenticationResult.isAuthenticated()).isTrue();
-	}
-
-	@Test
-	public void authenticateWhenConsentRequestInvalidStateThenThrowOAuth2AuthorizationCodeRequestAuthenticationException() {
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.build();
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(registeredClient, this.principal)
-						.build();
-		when(this.authorizationService.findByToken(eq(authentication.getState()), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(null);
-
-		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
-				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
-				.satisfies(ex ->
-						assertAuthenticationException((OAuth2AuthorizationCodeRequestAuthenticationException) ex,
-								OAuth2ErrorCodes.INVALID_REQUEST, OAuth2ParameterNames.STATE, null)
-				);
-	}
-
-	@Test
-	public void authenticateWhenConsentRequestPrincipalNotAuthenticatedThenThrowOAuth2AuthorizationCodeRequestAuthenticationException() {
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.build();
-		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(registeredClient)
-				.principalName(this.principal.getName())
-				.build();
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(registeredClient, this.principal)
-						.build();
-		when(this.authorizationService.findByToken(eq(authentication.getState()), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(authorization);
-		this.principal.setAuthenticated(false);
-
-		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
-				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
-				.satisfies(ex ->
-						assertAuthenticationException((OAuth2AuthorizationCodeRequestAuthenticationException) ex,
-								OAuth2ErrorCodes.INVALID_REQUEST, OAuth2ParameterNames.STATE, null)
-				);
-	}
-
-	@Test
-	public void authenticateWhenConsentRequestInvalidPrincipalThenThrowOAuth2AuthorizationCodeRequestAuthenticationException() {
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.build();
-		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(registeredClient)
-				.principalName(this.principal.getName().concat("-other"))
-				.build();
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(registeredClient, this.principal)
-						.build();
-		when(this.authorizationService.findByToken(eq(authentication.getState()), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(authorization);
-
-		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
-				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
-				.satisfies(ex ->
-						assertAuthenticationException((OAuth2AuthorizationCodeRequestAuthenticationException) ex,
-								OAuth2ErrorCodes.INVALID_REQUEST, OAuth2ParameterNames.STATE, null)
-				);
-	}
-
-	@Test
-	public void authenticateWhenConsentRequestInvalidClientIdThenThrowOAuth2AuthorizationCodeRequestAuthenticationException() {
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.build();
-		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(registeredClient)
-				.principalName(this.principal.getName())
-				.build();
-		when(this.authorizationService.findByToken(eq("state"), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(authorization);
-		RegisteredClient otherRegisteredClient = TestRegisteredClients.registeredClient2()
-				.build();
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(otherRegisteredClient, this.principal)
-						.state("state")
-						.build();
-
-		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
-				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
-				.satisfies(ex ->
-						assertAuthenticationException((OAuth2AuthorizationCodeRequestAuthenticationException) ex,
-								OAuth2ErrorCodes.INVALID_REQUEST, OAuth2ParameterNames.CLIENT_ID, null)
-				);
-	}
-
-	@Test
-	public void authenticateWhenConsentRequestDoesNotMatchClientThenThrowOAuth2AuthorizationCodeRequestAuthenticationException() {
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.build();
-		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
-				.thenReturn(registeredClient);
-		RegisteredClient otherRegisteredClient = TestRegisteredClients.registeredClient2()
-				.build();
-		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(otherRegisteredClient)
-				.principalName(this.principal.getName())
-				.build();
-		when(this.authorizationService.findByToken(eq("state"), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(authorization);
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(registeredClient, this.principal)
-						.state("state")
-						.build();
-
-		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
-				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
-				.satisfies(ex ->
-						assertAuthenticationException((OAuth2AuthorizationCodeRequestAuthenticationException) ex,
-								OAuth2ErrorCodes.INVALID_REQUEST, OAuth2ParameterNames.CLIENT_ID, null)
-				);
-	}
-
-	@Test
-	public void authenticateWhenConsentRequestScopeNotRequestedThenThrowOAuth2AuthorizationCodeRequestAuthenticationException() {
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.build();
-		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
-				.thenReturn(registeredClient);
-		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(registeredClient)
-				.principalName(this.principal.getName())
-				.build();
-		OAuth2AuthorizationRequest authorizationRequest = authorization.getAttribute(OAuth2AuthorizationRequest.class.getName());
-		Set<String> authorizedScopes = new HashSet<>(authorizationRequest.getScopes());
-		authorizedScopes.add("scope-not-requested");
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(registeredClient, this.principal)
-						.scopes(authorizedScopes)
-						.build();
-		when(this.authorizationService.findByToken(eq(authentication.getState()), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(authorization);
-
-		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
-				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
-				.satisfies(ex ->
-						assertAuthenticationException((OAuth2AuthorizationCodeRequestAuthenticationException) ex,
-								OAuth2ErrorCodes.INVALID_SCOPE, OAuth2ParameterNames.SCOPE, authorizationRequest.getRedirectUri())
-				);
-	}
-
-	@Test
-	public void authenticateWhenConsentRequestNotApprovedThenThrowOAuth2AuthorizationCodeRequestAuthenticationException() {
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.build();
-		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
-				.thenReturn(registeredClient);
-		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(registeredClient)
-				.principalName(this.principal.getName())
-				.build();
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(registeredClient, this.principal)
-						.scopes(new HashSet<>())	// No scopes approved
-						.build();
-		when(this.authorizationService.findByToken(eq(authentication.getState()), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(authorization);
-
-		OAuth2AuthorizationRequest authorizationRequest = authorization.getAttribute(OAuth2AuthorizationRequest.class.getName());
-
-		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
-				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
-				.satisfies(ex ->
-						assertAuthenticationException((OAuth2AuthorizationCodeRequestAuthenticationException) ex,
-								OAuth2ErrorCodes.ACCESS_DENIED, OAuth2ParameterNames.CLIENT_ID, authorizationRequest.getRedirectUri())
-				);
-
-		verify(this.authorizationService).remove(eq(authorization));
-	}
-
-	@Test
-	public void authenticateWhenConsentRequestApproveAllThenReturnAuthorizationCode() {
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.build();
-		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
-				.thenReturn(registeredClient);
-		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(registeredClient)
-				.principalName(this.principal.getName())
-				.build();
-		OAuth2AuthorizationRequest authorizationRequest = authorization.getAttribute(OAuth2AuthorizationRequest.class.getName());
-		Set<String> authorizedScopes = authorizationRequest.getScopes();
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(registeredClient, this.principal)
-						.scopes(authorizedScopes)		// Approve all scopes
-						.build();
-		when(this.authorizationService.findByToken(eq(authentication.getState()), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(authorization);
-
-		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
-				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
-
-		assertAuthorizationConsentRequestWithAuthorizationCodeResult(registeredClient, authorization, authenticationResult);
-	}
-
-	@Test
-	public void authenticateWhenCustomAuthorizationConsentCustomizerThenUsed() {
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.build();
-		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
-				.thenReturn(registeredClient);
-		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(registeredClient)
-				.principalName(this.principal.getName())
-				.build();
-		OAuth2AuthorizationRequest authorizationRequest = authorization.getAttribute(OAuth2AuthorizationRequest.class.getName());
-		Set<String> authorizedScopes = authorizationRequest.getScopes();
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(registeredClient, this.principal)
-						.scopes(authorizedScopes)		// Approve all scopes
-						.build();
-		when(this.authorizationService.findByToken(eq(authentication.getState()), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(authorization);
-
-		@SuppressWarnings("unchecked")
-		Consumer<OAuth2AuthorizationConsentAuthenticationContext> authorizationConsentCustomizer = mock(Consumer.class);
-		this.authenticationProvider.setAuthorizationConsentCustomizer(authorizationConsentCustomizer);
-
-		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
-				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
-
-		assertAuthorizationConsentRequestWithAuthorizationCodeResult(registeredClient, authorization, authenticationResult);
-
-		ArgumentCaptor<OAuth2AuthorizationConsentAuthenticationContext> authenticationContextCaptor =
-				ArgumentCaptor.forClass(OAuth2AuthorizationConsentAuthenticationContext.class);
-		verify(authorizationConsentCustomizer).accept(authenticationContextCaptor.capture());
-
-		OAuth2AuthorizationConsentAuthenticationContext authenticationContext = authenticationContextCaptor.getValue();
-		assertThat(authenticationContext.<Authentication>getAuthentication()).isEqualTo(authentication);
-		assertThat(authenticationContext.getAuthorizationConsent()).isNotNull();
-		assertThat(authenticationContext.getRegisteredClient()).isEqualTo(registeredClient);
-		assertThat(authenticationContext.getAuthorization()).isEqualTo(authorization);
-		assertThat(authenticationContext.getAuthorizationRequest()).isEqualTo(authorizationRequest);
-	}
-
-	private void assertAuthorizationConsentRequestWithAuthorizationCodeResult(
-			RegisteredClient registeredClient,
-			OAuth2Authorization authorization,
-			OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult) {
-		OAuth2AuthorizationRequest authorizationRequest = authorization.getAttribute(OAuth2AuthorizationRequest.class.getName());
-		Set<String> authorizedScopes = authorizationRequest.getScopes();
-
-		ArgumentCaptor<OAuth2AuthorizationConsent> authorizationConsentCaptor = ArgumentCaptor.forClass(OAuth2AuthorizationConsent.class);
-		verify(this.authorizationConsentService).save(authorizationConsentCaptor.capture());
-		OAuth2AuthorizationConsent authorizationConsent = authorizationConsentCaptor.getValue();
-
-		assertThat(authorizationConsent.getRegisteredClientId()).isEqualTo(authorization.getRegisteredClientId());
-		assertThat(authorizationConsent.getPrincipalName()).isEqualTo(authorization.getPrincipalName());
-		assertThat(authorizationConsent.getAuthorities()).hasSize(authorizedScopes.size());
-		assertThat(authorizationConsent.getScopes()).containsExactlyInAnyOrderElementsOf(authorizedScopes);
-
-		ArgumentCaptor<OAuth2Authorization> authorizationCaptor = ArgumentCaptor.forClass(OAuth2Authorization.class);
-		verify(this.authorizationService).save(authorizationCaptor.capture());
-		OAuth2Authorization updatedAuthorization = authorizationCaptor.getValue();
-
-		assertThat(updatedAuthorization.getRegisteredClientId()).isEqualTo(authorization.getRegisteredClientId());
-		assertThat(updatedAuthorization.getPrincipalName()).isEqualTo(authorization.getPrincipalName());
-		assertThat(updatedAuthorization.getAuthorizationGrantType()).isEqualTo(authorization.getAuthorizationGrantType());
-		assertThat(updatedAuthorization.<Authentication>getAttribute(Principal.class.getName()))
-				.isEqualTo(authorization.<Authentication>getAttribute(Principal.class.getName()));
-		assertThat(updatedAuthorization.<OAuth2AuthorizationRequest>getAttribute(OAuth2AuthorizationRequest.class.getName()))
-				.isEqualTo(authorizationRequest);
-		OAuth2Authorization.Token<OAuth2AuthorizationCode> authorizationCode = updatedAuthorization.getToken(OAuth2AuthorizationCode.class);
-		assertThat(authorizationCode).isNotNull();
-		assertThat(updatedAuthorization.<String>getAttribute(OAuth2ParameterNames.STATE)).isNull();
-		assertThat(updatedAuthorization.<Set<String>>getAttribute(OAuth2Authorization.AUTHORIZED_SCOPE_ATTRIBUTE_NAME))
-				.isEqualTo(authorizedScopes);
-
-		assertThat(authenticationResult.getClientId()).isEqualTo(registeredClient.getClientId());
-		assertThat(authenticationResult.getPrincipal()).isEqualTo(this.principal);
-		assertThat(authenticationResult.getAuthorizationUri()).isEqualTo(authorizationRequest.getAuthorizationUri());
-		assertThat(authenticationResult.getRedirectUri()).isEqualTo(authorizationRequest.getRedirectUri());
-		assertThat(authenticationResult.getScopes()).isEqualTo(authorizedScopes);
-		assertThat(authenticationResult.getState()).isEqualTo(authorizationRequest.getState());
-		assertThat(authenticationResult.getAuthorizationCode()).isEqualTo(authorizationCode.getToken());
-		assertThat(authenticationResult.isAuthenticated()).isTrue();
-	}
-
-	@Test
-	public void authenticateWhenConsentRequestApproveNoneAndRevokePreviouslyApprovedThenAuthorizationConsentRemoved() {
-		String previouslyApprovedScope = "message.read";
-		String requestedScope = "message.write";
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.scopes(scopes -> {
-					scopes.clear();
-					scopes.add(previouslyApprovedScope);
-					scopes.add(requestedScope);
-				})
-				.build();
-		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
-				.thenReturn(registeredClient);
-		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(registeredClient)
-				.principalName(this.principal.getName())
-				.build();
-		OAuth2AuthorizationRequest authorizationRequest = authorization.getAttribute(OAuth2AuthorizationRequest.class.getName());
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(registeredClient, this.principal)
-						.scopes(new HashSet<>())	// No scopes approved
-						.build();
-		when(this.authorizationService.findByToken(eq(authentication.getState()), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(authorization);
-		OAuth2AuthorizationConsent previousAuthorizationConsent =
-				OAuth2AuthorizationConsent.withId(authorization.getRegisteredClientId(), authorization.getPrincipalName())
-						.scope(previouslyApprovedScope)
-						.build();
-		when(this.authorizationConsentService.findById(eq(authorization.getRegisteredClientId()), eq(authorization.getPrincipalName())))
-				.thenReturn(previousAuthorizationConsent);
-
-		// Revoke all (including previously approved)
-		this.authenticationProvider.setAuthorizationConsentCustomizer((authorizationConsentContext) ->
-				authorizationConsentContext.getAuthorizationConsent().authorities(Set::clear));
-
-		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
-				.isInstanceOf(OAuth2AuthorizationCodeRequestAuthenticationException.class)
-				.satisfies(ex ->
-						assertAuthenticationException((OAuth2AuthorizationCodeRequestAuthenticationException) ex,
-								OAuth2ErrorCodes.ACCESS_DENIED, OAuth2ParameterNames.CLIENT_ID, authorizationRequest.getRedirectUri())
-				);
-
-		verify(this.authorizationConsentService).remove(eq(previousAuthorizationConsent));
-		verify(this.authorizationService).remove(eq(authorization));
-	}
-
-	@Test
-	public void authenticateWhenConsentRequestApproveSomeAndPreviouslyApprovedThenAuthorizationConsentUpdated() {
-		String previouslyApprovedScope = "message.read";
-		String requestedScope = "message.write";
-		String otherPreviouslyApprovedScope = "other.scope";
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.scopes(scopes -> {
-					scopes.clear();
-					scopes.add(previouslyApprovedScope);
-					scopes.add(requestedScope);
-				})
-				.build();
-		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
-				.thenReturn(registeredClient);
-		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(registeredClient)
-				.principalName(this.principal.getName())
-				.build();
-		OAuth2AuthorizationRequest authorizationRequest = authorization.getAttribute(OAuth2AuthorizationRequest.class.getName());
-		Set<String> requestedScopes = authorizationRequest.getScopes();
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(registeredClient, this.principal)
-						.scopes(requestedScopes)
-						.build();
-		when(this.authorizationService.findByToken(eq(authentication.getState()), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(authorization);
-		OAuth2AuthorizationConsent previousAuthorizationConsent =
-				OAuth2AuthorizationConsent.withId(authorization.getRegisteredClientId(), authorization.getPrincipalName())
-						.scope(previouslyApprovedScope)
-						.scope(otherPreviouslyApprovedScope)
-						.build();
-		when(this.authorizationConsentService.findById(eq(authorization.getRegisteredClientId()), eq(authorization.getPrincipalName())))
-				.thenReturn(previousAuthorizationConsent);
-
-		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
-				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
-
-		ArgumentCaptor<OAuth2AuthorizationConsent> authorizationConsentCaptor = ArgumentCaptor.forClass(OAuth2AuthorizationConsent.class);
-		verify(this.authorizationConsentService).save(authorizationConsentCaptor.capture());
-		OAuth2AuthorizationConsent updatedAuthorizationConsent = authorizationConsentCaptor.getValue();
-
-		assertThat(updatedAuthorizationConsent.getRegisteredClientId()).isEqualTo(previousAuthorizationConsent.getRegisteredClientId());
-		assertThat(updatedAuthorizationConsent.getPrincipalName()).isEqualTo(previousAuthorizationConsent.getPrincipalName());
-		assertThat(updatedAuthorizationConsent.getScopes()).containsExactlyInAnyOrder(
-				previouslyApprovedScope, otherPreviouslyApprovedScope, requestedScope);
-
-		ArgumentCaptor<OAuth2Authorization> authorizationCaptor = ArgumentCaptor.forClass(OAuth2Authorization.class);
-		verify(this.authorizationService).save(authorizationCaptor.capture());
-		OAuth2Authorization updatedAuthorization = authorizationCaptor.getValue();
-
-		assertThat(updatedAuthorization.<Set<String>>getAttribute(OAuth2Authorization.AUTHORIZED_SCOPE_ATTRIBUTE_NAME))
-				.isEqualTo(requestedScopes);
-
-		assertThat(authenticationResult.getScopes()).isEqualTo(requestedScopes);
-	}
-
-	@Test
-	public void authenticateWhenConsentRequestApproveNoneAndPreviouslyApprovedThenAuthorizationConsentNotUpdated() {
-		String previouslyApprovedScope = "message.read";
-		String requestedScope = "message.write";
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.scopes(scopes -> {
-					scopes.clear();
-					scopes.add(previouslyApprovedScope);
-					scopes.add(requestedScope);
-				})
-				.build();
-		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
-				.thenReturn(registeredClient);
-		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(registeredClient)
-				.principalName(this.principal.getName())
-				.build();
-		OAuth2AuthorizationCodeRequestAuthenticationToken authentication =
-				authorizationConsentRequestAuthentication(registeredClient, this.principal)
-						.scopes(new HashSet<>())	// No scopes approved
-						.build();
-		when(this.authorizationService.findByToken(eq(authentication.getState()), eq(STATE_TOKEN_TYPE)))
-				.thenReturn(authorization);
-		OAuth2AuthorizationConsent previousAuthorizationConsent =
-				OAuth2AuthorizationConsent.withId(authorization.getRegisteredClientId(), authorization.getPrincipalName())
-						.scope(previouslyApprovedScope)
-						.build();
-		when(this.authorizationConsentService.findById(eq(authorization.getRegisteredClientId()), eq(authorization.getPrincipalName())))
-				.thenReturn(previousAuthorizationConsent);
-
-		OAuth2AuthorizationCodeRequestAuthenticationToken authenticationResult =
-				(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationProvider.authenticate(authentication);
-
-		verify(this.authorizationConsentService, never()).save(any());
-		assertThat(authenticationResult.getScopes()).isEqualTo(Collections.singleton(previouslyApprovedScope));
 	}
 
 	private static void assertAuthenticationException(OAuth2AuthorizationCodeRequestAuthenticationException authenticationException,
@@ -1035,30 +619,6 @@ public class OAuth2AuthorizationCodeRequestAuthenticationProviderTests {
 		OAuth2AuthorizationCodeRequestAuthenticationToken authorizationCodeRequestAuthentication =
 				authenticationException.getAuthorizationCodeRequestAuthentication();
 		assertThat(authorizationCodeRequestAuthentication.getRedirectUri()).isEqualTo(redirectUri);
-
-		// gh-595
-		if (OAuth2ErrorCodes.ACCESS_DENIED.equals(errorCode)) {
-			assertThat(authorizationCodeRequestAuthentication.isConsent()).isFalse();
-			assertThat(authorizationCodeRequestAuthentication.isConsentRequired()).isFalse();
-		}
-	}
-
-	private static OAuth2AuthorizationCodeRequestAuthenticationToken.Builder authorizationCodeRequestAuthentication(
-			RegisteredClient registeredClient, Authentication principal) {
-		return OAuth2AuthorizationCodeRequestAuthenticationToken.with(registeredClient.getClientId(), principal)
-				.authorizationUri("https://provider.com/oauth2/authorize")
-				.redirectUri(registeredClient.getRedirectUris().iterator().next())
-				.scopes(registeredClient.getScopes())
-				.state("state");
-	}
-
-	private static OAuth2AuthorizationCodeRequestAuthenticationToken.Builder authorizationConsentRequestAuthentication(
-			RegisteredClient registeredClient, Authentication principal) {
-		return OAuth2AuthorizationCodeRequestAuthenticationToken.with(registeredClient.getClientId(), principal)
-				.authorizationUri("https://provider.com/oauth2/authorize")
-				.scopes(registeredClient.getScopes())
-				.state("state")
-				.consent(true);
 	}
 
 }

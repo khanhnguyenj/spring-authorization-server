@@ -4,7 +4,7 @@ image:https://github.com/spring-projects/spring-authorization-server/workflows/C
 
 = Spring Authorization Server
 
-The Spring Authorization Server project, led by the https://spring.io/projects/spring-security/[Spring Security] team, is focused on delivering https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-01#section-1.1[OAuth 2.1 Authorization Server] support to the Spring community.
+The Spring Authorization Server project, led by the https://spring.io/projects/spring-security/[Spring Security] team, is focused on delivering https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-06#section-1.1[OAuth 2.1 Authorization Server] support to the Spring community.
 
 This project replaces the Authorization Server support provided by https://spring.io/projects/spring-security-oauth/[Spring Security OAuth].
 
@@ -16,7 +16,8 @@ It is recommended to install the ZenHub https://www.zenhub.com/extension[browser
 The feature list can be viewed in the https://docs.spring.io/spring-authorization-server/docs/current/reference/html/overview.html#feature-list[reference documentation].
 
 == Support Policy
-The Spring Authorization Server project provides software support and is documented in its link:SUPPORT_POLICY.adoc[support policy].
+The Spring Authorization Server project provides software support through the https://tanzu.vmware.com/support/oss[VMware Tanzu OSS support policy].
+https://tanzu.vmware.com/spring-runtime[Commercial support], which offers an extended support period, is also available from VMware.
 
 == Getting Started
 The first place to start is to read the https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-01[OAuth 2.1 Authorization Framework] to gain an in-depth understanding on how to build an Authorization Server.
@@ -35,9 +36,9 @@ The goal is to leverage all the knowledge learned thus far and apply the same to
 Submitted work via pull requests should follow the same coding style/conventions and adopt the same or similar design patterns that have been established in Spring Security's OAuth 2.0 support.
 
 == Documentation
-Be sure to read the https://docs.spring.io/spring-security/reference[Spring Security Reference], as well as the https://docs.spring.io/spring-security/reference/servlet/oauth2/index.html[OAuth 2.0 Reference], which describes the Client and Resource Server features available.
+Be sure to read the https://docs.spring.io/spring-authorization-server/docs/current/reference/html/[Spring Authorization Server Reference] and https://docs.spring.io/spring-security/reference[Spring Security Reference], as well as the https://docs.spring.io/spring-security/reference/servlet/oauth2/index.html[OAuth 2.0 Reference], which describes the Client and Resource Server features available.
 
-Extensive JavaDoc for the Spring Security code is also available in the https://docs.spring.io/spring-security/site/docs/current/api/[Spring Security API Documentation].
+JavaDoc is also available for the https://docs.spring.io/spring-authorization-server/docs/current/api/[Spring Authorization Server API] and https://docs.spring.io/spring-security/site/docs/current/api/[Spring Security API].
 
 == Code of Conduct
 This project adheres to the Contributor Covenant link:CODE_OF_CONDUCT.adoc[code of conduct].
@@ -52,9 +53,9 @@ In the instructions below, https://vimeo.com/34436402[`./gradlew`] is invoked fr
 a cross-platform, self-contained bootstrap mechanism for the build.
 
 === Prerequisites
-https://help.github.com/set-up-git-redirect[Git] and the https://www.oracle.com/technetwork/java/javase/downloads[JDK8 build].
+https://help.github.com/set-up-git-redirect[Git] and the https://www.oracle.com/technetwork/java/javase/downloads[JDK17 build].
 
-Be sure that your `JAVA_HOME` environment variable points to the `jdk1.8.0` folder extracted from the JDK download.
+Be sure that your `JAVA_HOME` environment variable points to the `jdk17` folder extracted from the JDK download.
 
 === Check out sources
 [indent=0]

@@ -19,14 +19,9 @@ The OAuth2 authorization server `SecurityFilterChain` `@Bean` is configured with
 * xref:protocol-endpoints.adoc#oauth2-token-revocation-endpoint[OAuth2 Token Revocation endpoint]
 * xref:protocol-endpoints.adoc#oauth2-authorization-server-metadata-endpoint[OAuth2 Authorization Server Metadata endpoint]
 * xref:protocol-endpoints.adoc#jwk-set-endpoint[JWK Set endpoint]
-* xref:protocol-endpoints.adoc#oidc-provider-configuration-endpoint[OpenID Connect 1.0 Provider Configuration endpoint]
-* xref:protocol-endpoints.adoc#oidc-user-info-endpoint[OpenID Connect 1.0 UserInfo endpoint]
 
 [NOTE]
 The JWK Set endpoint is configured *only* if a `JWKSource<SecurityContext>` `@Bean` is registered.
-
-[NOTE]
-The xref:protocol-endpoints.adoc#oidc-client-registration-endpoint[OpenID Connect 1.0 Client Registration endpoint] is disabled by default because many deployments do not require dynamic client registration.
 
 The following example shows how to use `OAuth2AuthorizationServerConfiguration` to apply the minimal default configuration:
 
@@ -54,6 +49,29 @@ public class AuthorizationServerConfig {
 
 [IMPORTANT]
 The https://datatracker.ietf.org/doc/html/rfc6749#section-4.1[authorization_code grant] requires the resource owner to be authenticated. Therefore, a user authentication mechanism *must* be configured in addition to the default OAuth2 security configuration.
+
+https://openid.net/specs/openid-connect-core-1_0.html[OpenID Connect 1.0] is disabled in the default configuration. The following example shows how to enable OpenID Connect 1.0 by initializing the `OidcConfigurer`:
+
+[source,java]
+----
+@Bean
+public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
+	OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http);
+
+	http.getConfigurer(OAuth2AuthorizationServerConfigurer.class)
+		.oidc(Customizer.withDefaults());	// Initialize `OidcConfigurer`
+
+	return http.build();
+}
+----
+
+In addition to the default protocol endpoints, the OAuth2 authorization server `SecurityFilterChain` `@Bean` is configured with the following OpenID Connect 1.0 protocol endpoints:
+
+* xref:protocol-endpoints.adoc#oidc-provider-configuration-endpoint[OpenID Connect 1.0 Provider Configuration endpoint]
+* xref:protocol-endpoints.adoc#oidc-user-info-endpoint[OpenID Connect 1.0 UserInfo endpoint]
+
+[NOTE]
+The xref:protocol-endpoints.adoc#oidc-client-registration-endpoint[OpenID Connect 1.0 Client Registration endpoint] is disabled by default because many deployments do not require dynamic client registration.
 
 [TIP]
 `OAuth2AuthorizationServerConfiguration.jwtDecoder(JWKSource<SecurityContext>)` is a convenience (`static`) utility method that can be used to register a `JwtDecoder` `@Bean`, which is *REQUIRED* for the xref:protocol-endpoints.adoc#oidc-user-info-endpoint[OpenID Connect 1.0 UserInfo endpoint] and the xref:protocol-endpoints.adoc#oidc-client-registration-endpoint[OpenID Connect 1.0 Client Registration endpoint].
@@ -83,24 +101,26 @@ Furthermore, it lets you customize the request processing logic for the protocol
 ----
 @Bean
 public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
-	OAuth2AuthorizationServerConfigurer<HttpSecurity> authorizationServerConfigurer =
-		new OAuth2AuthorizationServerConfigurer<>();
+	OAuth2AuthorizationServerConfigurer authorizationServerConfigurer =
+		new OAuth2AuthorizationServerConfigurer();
 	http.apply(authorizationServerConfigurer);
 
 	authorizationServerConfigurer
 		.registeredClientRepository(registeredClientRepository) <1>
 		.authorizationService(authorizationService) <2>
 		.authorizationConsentService(authorizationConsentService)   <3>
-		.providerSettings(providerSettings) <4>
+		.authorizationServerSettings(authorizationServerSettings) <4>
 		.tokenGenerator(tokenGenerator) <5>
 		.clientAuthentication(clientAuthentication -> { })  <6>
 		.authorizationEndpoint(authorizationEndpoint -> { })    <7>
 		.tokenEndpoint(tokenEndpoint -> { })    <8>
 		.tokenIntrospectionEndpoint(tokenIntrospectionEndpoint -> { })  <9>
 		.tokenRevocationEndpoint(tokenRevocationEndpoint -> { })    <10>
+		.authorizationServerMetadataEndpoint(authorizationServerMetadataEndpoint -> { })    <11>
 		.oidc(oidc -> oidc
-			.userInfoEndpoint(userInfoEndpoint -> { })  <11>
-			.clientRegistrationEndpoint(clientRegistrationEndpoint -> { })  <12>
+			.providerConfigurationEndpoint(providerConfigurationEndpoint -> { })    <12>
+			.userInfoEndpoint(userInfoEndpoint -> { })  <13>
+			.clientRegistrationEndpoint(clientRegistrationEndpoint -> { })  <14>
 		);
 
 	return http.build();
@@ -109,26 +129,28 @@ public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity h
 <1> `registeredClientRepository()`: The xref:core-model-components.adoc#registered-client-repository[`RegisteredClientRepository`] (*REQUIRED*) for managing new and existing clients.
 <2> `authorizationService()`: The xref:core-model-components.adoc#oauth2-authorization-service[`OAuth2AuthorizationService`] for managing new and existing authorizations.
 <3> `authorizationConsentService()`: The xref:core-model-components.adoc#oauth2-authorization-consent-service[`OAuth2AuthorizationConsentService`] for managing new and existing authorization consents.
-<4> `providerSettings()`: The <<configuring-provider-settings, `ProviderSettings`>> (*REQUIRED*) for customizing configuration settings for the OAuth2 authorization server.
+<4> `authorizationServerSettings()`: The <<configuring-authorization-server-settings, `AuthorizationServerSettings`>> (*REQUIRED*) for customizing configuration settings for the OAuth2 authorization server.
 <5> `tokenGenerator()`: The xref:core-model-components.adoc#oauth2-token-generator[`OAuth2TokenGenerator`] for generating tokens supported by the OAuth2 authorization server.
 <6> `clientAuthentication()`: The configurer for <<configuring-client-authentication, OAuth2 Client Authentication>>.
 <7> `authorizationEndpoint()`: The configurer for the xref:protocol-endpoints.adoc#oauth2-authorization-endpoint[OAuth2 Authorization endpoint].
 <8> `tokenEndpoint()`: The configurer for the xref:protocol-endpoints.adoc#oauth2-token-endpoint[OAuth2 Token endpoint].
 <9> `tokenIntrospectionEndpoint()`: The configurer for the xref:protocol-endpoints.adoc#oauth2-token-introspection-endpoint[OAuth2 Token Introspection endpoint].
 <10> `tokenRevocationEndpoint()`: The configurer for the xref:protocol-endpoints.adoc#oauth2-token-revocation-endpoint[OAuth2 Token Revocation endpoint].
-<11> `userInfoEndpoint()`: The configurer for the xref:protocol-endpoints.adoc#oidc-user-info-endpoint[OpenID Connect 1.0 UserInfo endpoint].
-<12> `clientRegistrationEndpoint()`: The configurer for the xref:protocol-endpoints.adoc#oidc-client-registration-endpoint[OpenID Connect 1.0 Client Registration endpoint].
+<11> `authorizationServerMetadataEndpoint()`: The configurer for the xref:protocol-endpoints.adoc#oauth2-authorization-server-metadata-endpoint[OAuth2 Authorization Server Metadata endpoint].
+<12> `providerConfigurationEndpoint()`: The configurer for the xref:protocol-endpoints.adoc#oidc-provider-configuration-endpoint[OpenID Connect 1.0 Provider Configuration endpoint].
+<13> `userInfoEndpoint()`: The configurer for the xref:protocol-endpoints.adoc#oidc-user-info-endpoint[OpenID Connect 1.0 UserInfo endpoint].
+<14> `clientRegistrationEndpoint()`: The configurer for the xref:protocol-endpoints.adoc#oidc-client-registration-endpoint[OpenID Connect 1.0 Client Registration endpoint].
 
-[[configuring-provider-settings]]
-== Configuring Provider Settings
+[[configuring-authorization-server-settings]]
+== Configuring Authorization Server Settings
 
-`ProviderSettings` contains the configuration settings for the OAuth2 authorization server (provider).
+`AuthorizationServerSettings` contains the configuration settings for the OAuth2 authorization server.
 It specifies the `URI` for the protocol endpoints as well as the https://datatracker.ietf.org/doc/html/rfc8414#section-2[issuer identifier].
 The default `URI` for the protocol endpoints are as follows:
 
 [source,java]
 ----
-public final class ProviderSettings extends AbstractSettings {
+public final class AuthorizationServerSettings extends AbstractSettings {
 
 	...
 
@@ -149,18 +171,18 @@ public final class ProviderSettings extends AbstractSettings {
 ----
 
 [NOTE]
-`ProviderSettings` is a *REQUIRED* component.
+`AuthorizationServerSettings` is a *REQUIRED* component.
 
 [TIP]
-<<default-configuration, `@Import(OAuth2AuthorizationServerConfiguration.class)`>> automatically registers a `ProviderSettings` `@Bean`, if not already provided.
+<<default-configuration, `@Import(OAuth2AuthorizationServerConfiguration.class)`>> automatically registers an `AuthorizationServerSettings` `@Bean`, if not already provided.
 
-The following example shows how to customize the configuration settings and register a `ProviderSettings` `@Bean`:
+The following example shows how to customize the configuration settings and register an `AuthorizationServerSettings` `@Bean`:
 
 [source,java]
 ----
 @Bean
-public ProviderSettings providerSettings() {
-	return ProviderSettings.builder()
+public AuthorizationServerSettings authorizationServerSettings() {
+	return AuthorizationServerSettings.builder()
 		.issuer("https://example.com")
 		.authorizationEndpoint("/oauth2/v1/authorize")
 		.tokenEndpoint("/oauth2/v1/token")
@@ -173,17 +195,14 @@ public ProviderSettings providerSettings() {
 }
 ----
 
-The `ProviderContext` is a context object that holds information about the provider.
-It provides access to the `ProviderSettings` and the "`current`" issuer identifier.
+The `AuthorizationServerContext` is a context object that holds information of the Authorization Server runtime environment.
+It provides access to the `AuthorizationServerSettings` and the "`current`" issuer identifier.
 
 [NOTE]
-If the issuer identifier is not configured in `ProviderSettings.builder().issuer(String)`, it is resolved from the current request.
+If the issuer identifier is not configured in `AuthorizationServerSettings.builder().issuer(String)`, it is resolved from the current request.
 
 [NOTE]
-The `ProviderContext` is accessible through the `ProviderContextHolder`, which associates it with the current request thread by using a `ThreadLocal`.
-
-[NOTE]
-The `ProviderContextFilter` associates the `ProviderContext` with the `ProviderContextHolder`.
+The `AuthorizationServerContext` is accessible through the `AuthorizationServerContextHolder`, which associates it with the current request thread by using a `ThreadLocal`.
 
 [[configuring-client-authentication]]
 == Configuring Client Authentication
@@ -197,26 +216,30 @@ It defines extension points that let you customize the pre-processing, main proc
 ----
 @Bean
 public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
-	OAuth2AuthorizationServerConfigurer<HttpSecurity> authorizationServerConfigurer =
-		new OAuth2AuthorizationServerConfigurer<>();
+	OAuth2AuthorizationServerConfigurer authorizationServerConfigurer =
+		new OAuth2AuthorizationServerConfigurer();
 	http.apply(authorizationServerConfigurer);
 
 	authorizationServerConfigurer
 		.clientAuthentication(clientAuthentication ->
 			clientAuthentication
 				.authenticationConverter(authenticationConverter)   <1>
-				.authenticationProvider(authenticationProvider) <2>
-				.authenticationSuccessHandler(authenticationSuccessHandler) <3>
-				.errorResponseHandler(errorResponseHandler) <4>
+				.authenticationConverters(authenticationConvertersConsumer) <2>
+				.authenticationProvider(authenticationProvider) <3>
+				.authenticationProviders(authenticationProvidersConsumer)   <4>
+				.authenticationSuccessHandler(authenticationSuccessHandler) <5>
+				.errorResponseHandler(errorResponseHandler) <6>
 		);
 
 	return http.build();
 }
 ----
-<1> `authenticationConverter()`: The `AuthenticationConverter` (_pre-processor_) used when attempting to extract client credentials from `HttpServletRequest` to an instance of `OAuth2ClientAuthenticationToken`.
-<2> `authenticationProvider()`: The `AuthenticationProvider` (_main processor_) used for authenticating the `OAuth2ClientAuthenticationToken`. (One or more may be added to replace the defaults.)
-<3> `authenticationSuccessHandler()`: The `AuthenticationSuccessHandler` (_post-processor_) used for handling a successful client authentication and associating the `OAuth2ClientAuthenticationToken` to the `SecurityContext`.
-<4> `errorResponseHandler()`: The `AuthenticationFailureHandler` (_post-processor_) used for handling a failed client authentication and returning the https://datatracker.ietf.org/doc/html/rfc6749#section-5.2[`OAuth2Error` response].
+<1> `authenticationConverter()`: Adds an `AuthenticationConverter` (_pre-processor_) used when attempting to extract client credentials from `HttpServletRequest` to an instance of `OAuth2ClientAuthenticationToken`.
+<2> `authenticationConverters()`: Sets the `Consumer` providing access to the `List` of default and (optionally) added ``AuthenticationConverter``'s allowing the ability to add, remove, or customize a specific `AuthenticationConverter`.
+<3> `authenticationProvider()`: Adds an `AuthenticationProvider` (_main processor_) used for authenticating the `OAuth2ClientAuthenticationToken`.
+<4> `authenticationProviders()`: Sets the `Consumer` providing access to the `List` of default and (optionally) added ``AuthenticationProvider``'s allowing the ability to add, remove, or customize a specific `AuthenticationProvider`.
+<5> `authenticationSuccessHandler()`: The `AuthenticationSuccessHandler` (_post-processor_) used for handling a successful client authentication and associating the `OAuth2ClientAuthenticationToken` to the `SecurityContext`.
+<6> `errorResponseHandler()`: The `AuthenticationFailureHandler` (_post-processor_) used for handling a failed client authentication and returning the https://datatracker.ietf.org/doc/html/rfc6749#section-5.2[`OAuth2Error` response].
 
 `OAuth2ClientAuthenticationConfigurer` configures the `OAuth2ClientAuthenticationFilter` and registers it with the OAuth2 authorization server `SecurityFilterChain` `@Bean`.
 `OAuth2ClientAuthenticationFilter` is the `Filter` that processes client authentication requests.

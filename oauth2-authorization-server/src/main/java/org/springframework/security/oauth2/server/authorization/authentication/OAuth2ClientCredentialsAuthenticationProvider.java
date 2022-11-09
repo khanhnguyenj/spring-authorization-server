@@ -15,6 +15,7 @@
  */
 package org.springframework.security.oauth2.server.authorization.authentication;
 
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -28,11 +29,11 @@ import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.OAuth2Token;
-import org.springframework.security.oauth2.core.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
-import org.springframework.security.oauth2.server.authorization.context.ProviderContextHolder;
+import org.springframework.security.oauth2.server.authorization.context.AuthorizationServerContextHolder;
 import org.springframework.security.oauth2.server.authorization.token.DefaultOAuth2TokenContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
@@ -87,7 +88,7 @@ public final class OAuth2ClientCredentialsAuthenticationProvider implements Auth
 			throw new OAuth2AuthenticationException(OAuth2ErrorCodes.UNAUTHORIZED_CLIENT);
 		}
 
-		Set<String> authorizedScopes = registeredClient.getScopes();		// Default to configured scopes
+		Set<String> authorizedScopes = Collections.emptySet();
 		if (!CollectionUtils.isEmpty(clientCredentialsAuthentication.getScopes())) {
 			for (String requestedScope : clientCredentialsAuthentication.getScopes()) {
 				if (!registeredClient.getScopes().contains(requestedScope)) {
@@ -101,7 +102,7 @@ public final class OAuth2ClientCredentialsAuthenticationProvider implements Auth
 		OAuth2TokenContext tokenContext = DefaultOAuth2TokenContext.builder()
 				.registeredClient(registeredClient)
 				.principal(clientPrincipal)
-				.providerContext(ProviderContextHolder.getProviderContext())
+				.authorizationServerContext(AuthorizationServerContextHolder.getContext())
 				.authorizedScopes(authorizedScopes)
 				.tokenType(OAuth2TokenType.ACCESS_TOKEN)
 				.authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
@@ -123,7 +124,7 @@ public final class OAuth2ClientCredentialsAuthenticationProvider implements Auth
 		OAuth2Authorization.Builder authorizationBuilder = OAuth2Authorization.withRegisteredClient(registeredClient)
 				.principalName(clientPrincipal.getName())
 				.authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
-				.attribute(OAuth2Authorization.AUTHORIZED_SCOPE_ATTRIBUTE_NAME, authorizedScopes);
+				.authorizedScopes(authorizedScopes);
 		// @formatter:on
 		if (generatedAccessToken instanceof ClaimAccessor) {
 			authorizationBuilder.token(accessToken, (metadata) ->

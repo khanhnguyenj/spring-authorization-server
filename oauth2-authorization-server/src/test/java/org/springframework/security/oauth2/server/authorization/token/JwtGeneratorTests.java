@@ -22,15 +22,13 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
-import org.springframework.security.oauth2.core.OAuth2TokenFormat;
-import org.springframework.security.oauth2.core.OAuth2TokenType;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.core.oidc.IdTokenClaimNames;
@@ -42,14 +40,17 @@ import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.TestOAuth2Authorizations;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.TestRegisteredClients;
-import org.springframework.security.oauth2.server.authorization.config.ProviderSettings;
-import org.springframework.security.oauth2.server.authorization.config.TokenSettings;
-import org.springframework.security.oauth2.server.authorization.context.ProviderContext;
+import org.springframework.security.oauth2.server.authorization.context.AuthorizationServerContext;
+import org.springframework.security.oauth2.server.authorization.context.TestAuthorizationServerContext;
+import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.settings.OAuth2TokenFormat;
+import org.springframework.security.oauth2.server.authorization.settings.TokenSettings;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -66,16 +67,16 @@ public class JwtGeneratorTests {
 	private JwtEncoder jwtEncoder;
 	private OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer;
 	private JwtGenerator jwtGenerator;
-	private ProviderContext providerContext;
+	private AuthorizationServerContext authorizationServerContext;
 
-	@Before
+	@BeforeEach
 	public void setUp() {
 		this.jwtEncoder = mock(JwtEncoder.class);
 		this.jwtCustomizer = mock(OAuth2TokenCustomizer.class);
 		this.jwtGenerator = new JwtGenerator(this.jwtEncoder);
 		this.jwtGenerator.setJwtCustomizer(this.jwtCustomizer);
-		ProviderSettings providerSettings = ProviderSettings.builder().issuer("https://provider.com").build();
-		this.providerContext = new ProviderContext(providerSettings, null);
+		AuthorizationServerSettings authorizationServerSettings = AuthorizationServerSettings.builder().issuer("https://provider.com").build();
+		this.authorizationServerContext = new TestAuthorizationServerContext(authorizationServerSettings, null);
 	}
 
 	@Test
@@ -137,9 +138,9 @@ public class JwtGeneratorTests {
 		OAuth2TokenContext tokenContext = DefaultOAuth2TokenContext.builder()
 				.registeredClient(registeredClient)
 				.principal(authorization.getAttribute(Principal.class.getName()))
-				.providerContext(this.providerContext)
+				.authorizationServerContext(this.authorizationServerContext)
 				.authorization(authorization)
-				.authorizedScopes(authorization.getAttribute(OAuth2Authorization.AUTHORIZED_SCOPE_ATTRIBUTE_NAME))
+				.authorizedScopes(authorization.getAuthorizedScopes())
 				.tokenType(OAuth2TokenType.ACCESS_TOKEN)
 				.authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
 				.authorizationGrant(authentication)
@@ -151,7 +152,10 @@ public class JwtGeneratorTests {
 
 	@Test
 	public void generateWhenIdTokenTypeThenReturnJwt() {
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient().scope(OidcScopes.OPENID).build();
+		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
+				.scope(OidcScopes.OPENID)
+				.tokenSettings(TokenSettings.builder().idTokenSignatureAlgorithm(SignatureAlgorithm.ES256).build())
+				.build();
 		Map<String, Object> authenticationRequestAdditionalParameters = new HashMap<>();
 		authenticationRequestAdditionalParameters.put(OidcParameterNames.NONCE, "nonce");
 		OAuth2Authorization authorization = TestOAuth2Authorizations.authorization(
@@ -168,9 +172,9 @@ public class JwtGeneratorTests {
 		OAuth2TokenContext tokenContext = DefaultOAuth2TokenContext.builder()
 				.registeredClient(registeredClient)
 				.principal(authorization.getAttribute(Principal.class.getName()))
-				.providerContext(this.providerContext)
+				.authorizationServerContext(this.authorizationServerContext)
 				.authorization(authorization)
-				.authorizedScopes(authorization.getAttribute(OAuth2Authorization.AUTHORIZED_SCOPE_ATTRIBUTE_NAME))
+				.authorizedScopes(authorization.getAuthorizedScopes())
 				.tokenType(ID_TOKEN_TOKEN_TYPE)
 				.authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
 				.authorizationGrant(authentication)
@@ -187,7 +191,7 @@ public class JwtGeneratorTests {
 		verify(this.jwtCustomizer).customize(jwtEncodingContextCaptor.capture());
 
 		JwtEncodingContext jwtEncodingContext = jwtEncodingContextCaptor.getValue();
-		assertThat(jwtEncodingContext.getHeaders()).isNotNull();
+		assertThat(jwtEncodingContext.getJwsHeader()).isNotNull();
 		assertThat(jwtEncodingContext.getClaims()).isNotNull();
 		assertThat(jwtEncodingContext.getRegisteredClient()).isEqualTo(tokenContext.getRegisteredClient());
 		assertThat(jwtEncodingContext.<Authentication>getPrincipal()).isEqualTo(tokenContext.getPrincipal());
@@ -201,10 +205,14 @@ public class JwtGeneratorTests {
 		verify(this.jwtEncoder).encode(jwtEncoderParametersCaptor.capture());
 
 		JwsHeader jwsHeader = jwtEncoderParametersCaptor.getValue().getJwsHeader();
-		assertThat(jwsHeader.getAlgorithm()).isEqualTo(SignatureAlgorithm.RS256);
+		if (OidcParameterNames.ID_TOKEN.equals(tokenContext.getTokenType().getValue())) {
+			assertThat(jwsHeader.getAlgorithm()).isEqualTo(tokenContext.getRegisteredClient().getTokenSettings().getIdTokenSignatureAlgorithm());
+		} else {
+			assertThat(jwsHeader.getAlgorithm()).isEqualTo(SignatureAlgorithm.RS256);
+		}
 
 		JwtClaimsSet jwtClaimsSet = jwtEncoderParametersCaptor.getValue().getClaims();
-		assertThat(jwtClaimsSet.getIssuer().toExternalForm()).isEqualTo(tokenContext.getProviderContext().getIssuer());
+		assertThat(jwtClaimsSet.getIssuer().toExternalForm()).isEqualTo(tokenContext.getAuthorizationServerContext().getIssuer());
 		assertThat(jwtClaimsSet.getSubject()).isEqualTo(tokenContext.getAuthorization().getPrincipalName());
 		assertThat(jwtClaimsSet.getAudience()).containsExactly(tokenContext.getRegisteredClient().getClientId());
 

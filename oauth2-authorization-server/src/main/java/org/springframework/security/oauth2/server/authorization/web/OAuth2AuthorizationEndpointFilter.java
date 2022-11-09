@@ -17,17 +17,21 @@ package org.springframework.security.oauth2.server.authorization.web;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationDetailsSource;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.core.Authentication;
@@ -40,7 +44,11 @@ import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationException;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationConsentAuthenticationProvider;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationConsentAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.web.authentication.DelegatingAuthenticationConverter;
 import org.springframework.security.oauth2.server.authorization.web.authentication.OAuth2AuthorizationCodeRequestAuthenticationConverter;
+import org.springframework.security.oauth2.server.authorization.web.authentication.OAuth2AuthorizationConsentAuthenticationConverter;
 import org.springframework.security.web.DefaultRedirectStrategy;
 import org.springframework.security.web.RedirectStrategy;
 import org.springframework.security.web.authentication.AuthenticationConverter;
@@ -61,7 +69,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 /**
  * A {@code Filter} for the OAuth 2.0 Authorization Code Grant,
- * which handles the processing of the OAuth 2.0 Authorization Request (and Consent).
+ * which handles the processing of the OAuth 2.0 Authorization Request and Consent.
  *
  * @author Joe Grandja
  * @author Paurav Munshi
@@ -71,6 +79,7 @@ import org.springframework.web.util.UriComponentsBuilder;
  * @since 0.0.1
  * @see AuthenticationManager
  * @see OAuth2AuthorizationCodeRequestAuthenticationProvider
+ * @see OAuth2AuthorizationConsentAuthenticationProvider
  * @see <a target="_blank" href="https://datatracker.ietf.org/doc/html/rfc6749#section-4.1">Section 4.1 Authorization Code Grant</a>
  * @see <a target="_blank" href="https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.1">Section 4.1.1 Authorization Request</a>
  * @see <a target="_blank" href="https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2">Section 4.1.2 Authorization Response</a>
@@ -110,7 +119,10 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 		Assert.hasText(authorizationEndpointUri, "authorizationEndpointUri cannot be empty");
 		this.authenticationManager = authenticationManager;
 		this.authorizationEndpointMatcher = createDefaultRequestMatcher(authorizationEndpointUri);
-		this.authenticationConverter = new OAuth2AuthorizationCodeRequestAuthenticationConverter();
+		this.authenticationConverter = new DelegatingAuthenticationConverter(
+				Arrays.asList(
+						new OAuth2AuthorizationCodeRequestAuthenticationConverter(),
+						new OAuth2AuthorizationConsentAuthenticationConverter()));
 	}
 
 	private static RequestMatcher createDefaultRequestMatcher(String authorizationEndpointUri) {
@@ -145,14 +157,14 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 		}
 
 		try {
-			OAuth2AuthorizationCodeRequestAuthenticationToken authorizationCodeRequestAuthentication =
-					(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationConverter.convert(request);
-			authorizationCodeRequestAuthentication.setDetails(this.authenticationDetailsSource.buildDetails(request));
+			Authentication authentication = this.authenticationConverter.convert(request);
+			if (authentication instanceof AbstractAuthenticationToken) {
+				((AbstractAuthenticationToken) authentication)
+						.setDetails(this.authenticationDetailsSource.buildDetails(request));
+			}
+			Authentication authenticationResult = this.authenticationManager.authenticate(authentication);
 
-			OAuth2AuthorizationCodeRequestAuthenticationToken authorizationCodeRequestAuthenticationResult =
-					(OAuth2AuthorizationCodeRequestAuthenticationToken) this.authenticationManager.authenticate(authorizationCodeRequestAuthentication);
-
-			if (!authorizationCodeRequestAuthenticationResult.isAuthenticated()) {
+			if (!authenticationResult.isAuthenticated()) {
 				// If the Principal (Resource Owner) is not authenticated then
 				// pass through the chain with the expectation that the authentication process
 				// will commence via AuthenticationEntryPoint
@@ -160,13 +172,15 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 				return;
 			}
 
-			if (authorizationCodeRequestAuthenticationResult.isConsentRequired()) {
-				sendAuthorizationConsent(request, response, authorizationCodeRequestAuthentication, authorizationCodeRequestAuthenticationResult);
+			if (authenticationResult instanceof OAuth2AuthorizationConsentAuthenticationToken) {
+				sendAuthorizationConsent(request, response,
+						(OAuth2AuthorizationCodeRequestAuthenticationToken) authentication,
+						(OAuth2AuthorizationConsentAuthenticationToken) authenticationResult);
 				return;
 			}
 
 			this.authenticationSuccessHandler.onAuthenticationSuccess(
-					request, response, authorizationCodeRequestAuthenticationResult);
+					request, response, authenticationResult);
 
 		} catch (OAuth2AuthenticationException ex) {
 			this.authenticationFailureHandler.onAuthenticationFailure(request, response, ex);
@@ -186,7 +200,8 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 
 	/**
 	 * Sets the {@link AuthenticationConverter} used when attempting to extract an Authorization Request (or Consent) from {@link HttpServletRequest}
-	 * to an instance of {@link OAuth2AuthorizationCodeRequestAuthenticationToken} used for authenticating the request.
+	 * to an instance of {@link OAuth2AuthorizationCodeRequestAuthenticationToken} or {@link OAuth2AuthorizationConsentAuthenticationToken}
+	 * used for authenticating the request.
 	 *
 	 * @param authenticationConverter the {@link AuthenticationConverter} used when attempting to extract an Authorization Request (or Consent) from {@link HttpServletRequest}
 	 */
@@ -229,13 +244,13 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 
 	private void sendAuthorizationConsent(HttpServletRequest request, HttpServletResponse response,
 			OAuth2AuthorizationCodeRequestAuthenticationToken authorizationCodeRequestAuthentication,
-			OAuth2AuthorizationCodeRequestAuthenticationToken authorizationCodeRequestAuthenticationResult) throws IOException {
+			OAuth2AuthorizationConsentAuthenticationToken authorizationConsentAuthentication) throws IOException {
 
-		String clientId = authorizationCodeRequestAuthenticationResult.getClientId();
-		Authentication principal = (Authentication) authorizationCodeRequestAuthenticationResult.getPrincipal();
+		String clientId = authorizationConsentAuthentication.getClientId();
+		Authentication principal = (Authentication) authorizationConsentAuthentication.getPrincipal();
 		Set<String> requestedScopes = authorizationCodeRequestAuthentication.getScopes();
-		Set<String> authorizedScopes = authorizationCodeRequestAuthenticationResult.getScopes();
-		String state = authorizationCodeRequestAuthenticationResult.getState();
+		Set<String> authorizedScopes = authorizationConsentAuthentication.getScopes();
+		String state = authorizationConsentAuthentication.getState();
 
 		if (hasConsentUri()) {
 			String redirectUri = UriComponentsBuilder.fromUriString(resolveConsentUri(request))
@@ -274,10 +289,16 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 		UriComponentsBuilder uriBuilder = UriComponentsBuilder
 				.fromUriString(authorizationCodeRequestAuthentication.getRedirectUri())
 				.queryParam(OAuth2ParameterNames.CODE, authorizationCodeRequestAuthentication.getAuthorizationCode().getTokenValue());
+		String redirectUri;
 		if (StringUtils.hasText(authorizationCodeRequestAuthentication.getState())) {
-			uriBuilder.queryParam(OAuth2ParameterNames.STATE, authorizationCodeRequestAuthentication.getState());
+			uriBuilder.queryParam(OAuth2ParameterNames.STATE, "{state}");
+			Map<String, String> queryParams = new HashMap<>();
+			queryParams.put(OAuth2ParameterNames.STATE, authorizationCodeRequestAuthentication.getState());
+			redirectUri = uriBuilder.build(queryParams).toString();
+		} else {
+			redirectUri = uriBuilder.toUriString();
 		}
-		this.redirectStrategy.sendRedirect(request, response, uriBuilder.toUriString());
+		this.redirectStrategy.sendRedirect(request, response, redirectUri);
 	}
 
 	private void sendErrorResponse(HttpServletRequest request, HttpServletResponse response,
@@ -291,7 +312,6 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 
 		if (authorizationCodeRequestAuthentication == null ||
 				!StringUtils.hasText(authorizationCodeRequestAuthentication.getRedirectUri())) {
-			// TODO Send default html error response
 			response.sendError(HttpStatus.BAD_REQUEST.value(), error.toString());
 			return;
 		}
@@ -305,10 +325,16 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 		if (StringUtils.hasText(error.getUri())) {
 			uriBuilder.queryParam(OAuth2ParameterNames.ERROR_URI, error.getUri());
 		}
+		String redirectUri;
 		if (StringUtils.hasText(authorizationCodeRequestAuthentication.getState())) {
-			uriBuilder.queryParam(OAuth2ParameterNames.STATE, authorizationCodeRequestAuthentication.getState());
+			uriBuilder.queryParam(OAuth2ParameterNames.STATE, "{state}");
+			Map<String, String> queryParams = new HashMap<>();
+			queryParams.put(OAuth2ParameterNames.STATE, authorizationCodeRequestAuthentication.getState());
+			redirectUri = uriBuilder.build(queryParams).toString();
+		} else {
+			redirectUri = uriBuilder.toUriString();
 		}
-		this.redirectStrategy.sendRedirect(request, response, uriBuilder.toUriString());
+		this.redirectStrategy.sendRedirect(request, response, redirectUri);
 	}
 
 	/**

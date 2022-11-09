@@ -15,11 +15,13 @@
  */
 package org.springframework.security.oauth2.server.authorization.authentication;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.security.crypto.password.NoOpPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -27,11 +29,11 @@ import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
-import org.springframework.security.oauth2.core.OAuth2TokenType;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.core.endpoint.PkceParameterNames;
 import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.TestOAuth2Authorizations;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
@@ -67,7 +69,7 @@ public class ClientSecretAuthenticationProviderTests {
 	private ClientSecretAuthenticationProvider authenticationProvider;
 	private PasswordEncoder passwordEncoder;
 
-	@Before
+	@BeforeEach
 	public void setUp() {
 		this.registeredClientRepository = mock(RegisteredClientRepository.class);
 		this.authorizationService = mock(OAuth2AuthorizationService.class);
@@ -178,6 +180,26 @@ public class ClientSecretAuthenticationProviderTests {
 				.satisfies(error -> {
 					assertThat(error.getErrorCode()).isEqualTo(OAuth2ErrorCodes.INVALID_CLIENT);
 					assertThat(error.getDescription()).contains(OAuth2ParameterNames.CLIENT_SECRET);
+				});
+		verify(this.passwordEncoder).matches(any(), any());
+	}
+
+	@Test
+	public void authenticateWhenExpiredClientSecretThenThrowOAuth2AuthenticationException() {
+		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
+				.clientSecretExpiresAt(Instant.now().minus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS))
+				.build();
+		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
+				.thenReturn(registeredClient);
+
+		OAuth2ClientAuthenticationToken authentication = new OAuth2ClientAuthenticationToken(
+				registeredClient.getClientId(), ClientAuthenticationMethod.CLIENT_SECRET_BASIC, registeredClient.getClientSecret(), null);
+		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
+				.isInstanceOf(OAuth2AuthenticationException.class)
+				.extracting(ex -> ((OAuth2AuthenticationException) ex).getError())
+				.satisfies(error -> {
+					assertThat(error.getErrorCode()).isEqualTo(OAuth2ErrorCodes.INVALID_CLIENT);
+					assertThat(error.getDescription()).contains("client_secret_expires_at");
 				});
 		verify(this.passwordEncoder).matches(any(), any());
 	}

@@ -120,8 +120,8 @@ Alternatively, you can configure the `RegisteredClientRepository` through the xr
 ----
 @Bean
 public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
-	OAuth2AuthorizationServerConfigurer<HttpSecurity> authorizationServerConfigurer =
-		new OAuth2AuthorizationServerConfigurer<>();
+	OAuth2AuthorizationServerConfigurer authorizationServerConfigurer =
+		new OAuth2AuthorizationServerConfigurer();
 	http.apply(authorizationServerConfigurer);
 
 	authorizationServerConfigurer
@@ -163,8 +163,9 @@ public class OAuth2Authorization implements Serializable {
 	private String registeredClientId;  <2>
 	private String principalName;   <3>
 	private AuthorizationGrantType authorizationGrantType;  <4>
-	private Map<Class<? extends OAuth2Token>, Token<?>> tokens; <5>
-	private Map<String, Object> attributes; <6>
+	private Set<String> authorizedScopes;   <5>
+	private Map<Class<? extends OAuth2Token>, Token<?>> tokens; <6>
+	private Map<String, Object> attributes; <7>
 
 	...
 
@@ -174,8 +175,9 @@ public class OAuth2Authorization implements Serializable {
 <2> `registeredClientId`: The ID that uniquely identifies the <<registered-client, RegisteredClient>>.
 <3> `principalName`: The principal name of the resource owner (or client).
 <4> `authorizationGrantType`: The `AuthorizationGrantType` used.
-<5> `tokens`: The `OAuth2Token` instances (and associated metadata) specific to the executed authorization grant type.
-<6> `attributes`: The additional attributes specific to the executed authorization grant type – for example, the authenticated `Principal`, `OAuth2AuthorizationRequest`, authorized scope(s), and others.
+<5> `authorizedScopes`: The `Set` of scope(s) authorized for the client.
+<6> `tokens`: The `OAuth2Token` instances (and associated metadata) specific to the executed authorization grant type.
+<7> `attributes`: The additional attributes specific to the executed authorization grant type – for example, the authenticated `Principal`, `OAuth2AuthorizationRequest`, and others.
 
 `OAuth2Authorization` and its associated `OAuth2Token` instances have a set lifespan.
 A newly issued `OAuth2Token` is active and becomes inactive when it either expires or is invalidated (revoked).
@@ -213,8 +215,8 @@ Alternatively, you can configure the `OAuth2AuthorizationService` through the xr
 ----
 @Bean
 public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
-	OAuth2AuthorizationServerConfigurer<HttpSecurity> authorizationServerConfigurer =
-		new OAuth2AuthorizationServerConfigurer<>();
+	OAuth2AuthorizationServerConfigurer authorizationServerConfigurer =
+		new OAuth2AuthorizationServerConfigurer();
 	http.apply(authorizationServerConfigurer);
 
 	authorizationServerConfigurer
@@ -285,8 +287,8 @@ Alternatively, you can configure the `OAuth2AuthorizationConsentService` through
 ----
 @Bean
 public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
-	OAuth2AuthorizationServerConfigurer<HttpSecurity> authorizationServerConfigurer =
-		new OAuth2AuthorizationServerConfigurer<>();
+	OAuth2AuthorizationServerConfigurer authorizationServerConfigurer =
+		new OAuth2AuthorizationServerConfigurer();
 	http.apply(authorizationServerConfigurer);
 
 	authorizationServerConfigurer
@@ -316,7 +318,7 @@ public interface OAuth2TokenContext extends Context {
 
 	default <T extends Authentication> T getPrincipal() ... <2>
 
-	default ProviderContext getProviderContext() ...    <3>
+	default AuthorizationServerContext getAuthorizationServerContext() ...    <3>
 
 	@Nullable
 	default OAuth2Authorization getAuthorization() ...  <4>
@@ -335,7 +337,7 @@ public interface OAuth2TokenContext extends Context {
 ----
 <1> `getRegisteredClient()`: The <<registered-client, RegisteredClient>> associated with the authorization grant.
 <2> `getPrincipal()`: The `Authentication` instance of the resource owner (or client).
-<3> `getProviderContext()`: The xref:configuration-model.adoc#configuring-provider-settings[`ProviderContext`] object that holds information related to the provider.
+<3> `getAuthorizationServerContext()`: The xref:configuration-model.adoc#configuring-authorization-server-settings[`AuthorizationServerContext`] object that holds information of the Authorization Server runtime environment.
 <4> `getAuthorization()`: The <<oauth2-authorization, OAuth2Authorization>> associated with the authorization grant.
 <5> `getAuthorizedScopes()`: The scope(s) authorized for the client.
 <6> `getTokenType()`: The `OAuth2TokenType` to generate. The supported values are `code`, `access_token`, `refresh_token`, and `id_token`.
@@ -396,8 +398,8 @@ Alternatively, you can configure the `OAuth2TokenGenerator` through the xref:con
 ----
 @Bean
 public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
-	OAuth2AuthorizationServerConfigurer<HttpSecurity> authorizationServerConfigurer =
-		new OAuth2AuthorizationServerConfigurer<>();
+	OAuth2AuthorizationServerConfigurer authorizationServerConfigurer =
+		new OAuth2AuthorizationServerConfigurer();
 	http.apply(authorizationServerConfigurer);
 
 	authorizationServerConfigurer

@@ -29,20 +29,18 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.OctetSequenceKey;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
-import org.springframework.security.oauth2.core.OAuth2TokenType;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.core.endpoint.PkceParameterNames;
 import org.springframework.security.oauth2.jose.TestJwks;
 import org.springframework.security.oauth2.jose.TestKeys;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -53,14 +51,15 @@ import org.springframework.security.oauth2.jwt.JwtValidationException;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.TestOAuth2Authorizations;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.TestRegisteredClients;
-import org.springframework.security.oauth2.server.authorization.config.ClientSettings;
-import org.springframework.security.oauth2.server.authorization.config.ProviderSettings;
-import org.springframework.security.oauth2.server.authorization.context.ProviderContext;
-import org.springframework.security.oauth2.server.authorization.context.ProviderContextHolder;
+import org.springframework.security.oauth2.server.authorization.context.AuthorizationServerContextHolder;
+import org.springframework.security.oauth2.server.authorization.context.TestAuthorizationServerContext;
+import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -91,16 +90,16 @@ public class JwtClientAssertionAuthenticationProviderTests {
 	private RegisteredClientRepository registeredClientRepository;
 	private OAuth2AuthorizationService authorizationService;
 	private JwtClientAssertionAuthenticationProvider authenticationProvider;
-	private ProviderSettings providerSettings;
+	private AuthorizationServerSettings authorizationServerSettings;
 
-	@Before
+	@BeforeEach
 	public void setUp() {
 		this.registeredClientRepository = mock(RegisteredClientRepository.class);
 		this.authorizationService = mock(OAuth2AuthorizationService.class);
 		this.authenticationProvider = new JwtClientAssertionAuthenticationProvider(
 				this.registeredClientRepository, this.authorizationService);
-		this.providerSettings = ProviderSettings.builder().issuer("https://auth-server.com").build();
-		ProviderContextHolder.setProviderContext(new ProviderContext(this.providerSettings, null));
+		this.authorizationServerSettings = AuthorizationServerSettings.builder().issuer("https://auth-server.com").build();
+		AuthorizationServerContextHolder.setContext(new TestAuthorizationServerContext(this.authorizationServerSettings, null));
 	}
 
 	@Test
@@ -115,6 +114,13 @@ public class JwtClientAssertionAuthenticationProviderTests {
 		assertThatThrownBy(() -> new JwtClientAssertionAuthenticationProvider(this.registeredClientRepository, null))
 				.isInstanceOf(IllegalArgumentException.class)
 				.hasMessage("authorizationService cannot be null");
+	}
+
+	@Test
+	public void setJwtDecoderFactoryWhenNullThenThrowIllegalArgumentException() {
+		assertThatThrownBy(() -> this.authenticationProvider.setJwtDecoderFactory(null))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessage("jwtDecoderFactory cannot be null");
 	}
 
 	@Test
@@ -178,84 +184,6 @@ public class JwtClientAssertionAuthenticationProviderTests {
 				.satisfies(error -> {
 					assertThat(error.getErrorCode()).isEqualTo(OAuth2ErrorCodes.INVALID_CLIENT);
 					assertThat(error.getDescription()).contains("credentials");
-				});
-	}
-
-	@Test
-	public void authenticateWhenMissingJwkSetUrlThenThrowOAuth2AuthenticationException() {
-		// @formatter:off
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.clientAuthenticationMethod(ClientAuthenticationMethod.PRIVATE_KEY_JWT)
-				.clientSettings(
-						ClientSettings.builder()
-								.tokenEndpointAuthenticationSigningAlgorithm(SignatureAlgorithm.RS256)
-								.build()
-				)
-				.build();
-		// @formatter:on
-		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
-				.thenReturn(registeredClient);
-
-		OAuth2ClientAuthenticationToken authentication = new OAuth2ClientAuthenticationToken(
-				registeredClient.getClientId(), JWT_CLIENT_ASSERTION_AUTHENTICATION_METHOD, "jwt-assertion", null);
-		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
-				.isInstanceOf(OAuth2AuthenticationException.class)
-				.extracting(ex -> ((OAuth2AuthenticationException) ex).getError())
-				.satisfies(error -> {
-					assertThat(error.getErrorCode()).isEqualTo(OAuth2ErrorCodes.INVALID_CLIENT);
-					assertThat(error.getDescription()).isEqualTo("Failed to find a Signature Verifier for Client: '" +
-							registeredClient.getId() + "'. Check to ensure you have configured the JWK Set URL.");
-				});
-	}
-
-	@Test
-	public void authenticateWhenMissingClientSecretThenThrowOAuth2AuthenticationException() {
-		// @formatter:off
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.clientSecret(null)
-				.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_JWT)
-				.clientSettings(
-						ClientSettings.builder()
-								.tokenEndpointAuthenticationSigningAlgorithm(MacAlgorithm.HS256)
-								.build()
-				)
-				.build();
-		// @formatter:on
-		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
-				.thenReturn(registeredClient);
-
-		OAuth2ClientAuthenticationToken authentication = new OAuth2ClientAuthenticationToken(
-				registeredClient.getClientId(), JWT_CLIENT_ASSERTION_AUTHENTICATION_METHOD, "jwt-assertion", null);
-		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
-				.isInstanceOf(OAuth2AuthenticationException.class)
-				.extracting(ex -> ((OAuth2AuthenticationException) ex).getError())
-				.satisfies(error -> {
-					assertThat(error.getErrorCode()).isEqualTo(OAuth2ErrorCodes.INVALID_CLIENT);
-					assertThat(error.getDescription()).isEqualTo("Failed to find a Signature Verifier for Client: '" +
-							registeredClient.getId() + "'. Check to ensure you have configured the client secret.");
-				});
-	}
-
-	@Test
-	public void authenticateWhenMissingSigningAlgorithmThenThrowOAuth2AuthenticationException() {
-		// @formatter:off
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient()
-				.clientSecret(TestKeys.DEFAULT_ENCODED_SECRET_KEY)
-				.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_JWT)
-				.build();
-		// @formatter:on
-		when(this.registeredClientRepository.findByClientId(eq(registeredClient.getClientId())))
-				.thenReturn(registeredClient);
-
-		OAuth2ClientAuthenticationToken authentication = new OAuth2ClientAuthenticationToken(
-				registeredClient.getClientId(), JWT_CLIENT_ASSERTION_AUTHENTICATION_METHOD, "jwt-assertion", null);
-		assertThatThrownBy(() -> this.authenticationProvider.authenticate(authentication))
-				.isInstanceOf(OAuth2AuthenticationException.class)
-				.extracting(ex -> ((OAuth2AuthenticationException) ex).getError())
-				.satisfies(error -> {
-					assertThat(error.getErrorCode()).isEqualTo(OAuth2ErrorCodes.INVALID_CLIENT);
-					assertThat(error.getDescription()).isEqualTo("Failed to find a Signature Verifier for Client: '" +
-							registeredClient.getId() + "'. Check to ensure you have configured a valid JWS Algorithm: 'null'.");
 				});
 	}
 
@@ -421,7 +349,7 @@ public class JwtClientAssertionAuthenticationProviderTests {
 		return JwtClaimsSet.builder()
 				.issuer(registeredClient.getClientId())
 				.subject(registeredClient.getClientId())
-				.audience(Collections.singletonList(asUrl(this.providerSettings.getIssuer(), this.providerSettings.getTokenEndpoint())))
+				.audience(Collections.singletonList(asUrl(this.authorizationServerSettings.getIssuer(), this.authorizationServerSettings.getTokenEndpoint())))
 				.issuedAt(issuedAt)
 				.expiresAt(expiresAt);
 	}

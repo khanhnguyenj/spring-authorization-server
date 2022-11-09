@@ -21,13 +21,13 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.function.Consumer;
 
-import javax.servlet.FilterChain;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageConverter;
@@ -43,9 +43,9 @@ import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
-import org.springframework.security.oauth2.core.OAuth2TokenType;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.core.http.converter.OAuth2ErrorHttpMessageConverter;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2TokenRevocationAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
@@ -75,13 +75,13 @@ public class OAuth2TokenRevocationEndpointFilterTests {
 	private final HttpMessageConverter<OAuth2Error> errorHttpResponseConverter =
 			new OAuth2ErrorHttpMessageConverter();
 
-	@Before
+	@BeforeEach
 	public void setUp() {
 		this.authenticationManager = mock(AuthenticationManager.class);
 		this.filter = new OAuth2TokenRevocationEndpointFilter(this.authenticationManager);
 	}
 
-	@After
+	@AfterEach
 	public void cleanup() {
 		SecurityContextHolder.clearContext();
 	}

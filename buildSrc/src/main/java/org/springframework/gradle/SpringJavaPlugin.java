@@ -29,6 +29,7 @@ import org.gradle.api.plugins.JavaPluginExtension;
 import org.gradle.api.plugins.PluginManager;
 import org.gradle.api.tasks.compile.CompileOptions;
 import org.gradle.api.tasks.compile.JavaCompile;
+import org.gradle.api.tasks.testing.Test;
 import org.gradle.jvm.tasks.Jar;
 import org.jetbrains.kotlin.gradle.plugin.KotlinPluginWrapper;
 
@@ -73,7 +74,7 @@ public class SpringJavaPlugin implements Plugin<Project> {
 
 		// Apply Java source compatibility version
 		JavaPluginExtension java = project.getExtensions().getByType(JavaPluginExtension.class);
-		java.setTargetCompatibility(JavaVersion.VERSION_1_8);
+		java.setTargetCompatibility(JavaVersion.VERSION_17);
 
 		// Configure Java tasks
 		project.getTasks().withType(JavaCompile.class, (javaCompile) -> {
@@ -81,7 +82,7 @@ public class SpringJavaPlugin implements Plugin<Project> {
 			options.setEncoding("UTF-8");
 			options.getCompilerArgs().add("-parameters");
 			if (JavaVersion.current().isJava11Compatible()) {
-				options.getRelease().set(8);
+				options.getRelease().set(17);
 			}
 		});
 		project.getTasks().withType(Jar.class, (jar) -> jar.manifest((manifest) -> {
@@ -92,5 +93,8 @@ public class SpringJavaPlugin implements Plugin<Project> {
 			attributes.put("Automatic-Module-Name", project.getName().replace("-", "."));
 			manifest.attributes(attributes);
 		}));
+		project.getTasks().withType(Test.class, (test) -> {
+			test.useJUnitPlatform();
+		});
 	}
 }

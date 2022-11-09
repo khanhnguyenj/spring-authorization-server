@@ -39,11 +39,11 @@ import org.springframework.jdbc.core.SqlParameterValue;
 import org.springframework.security.jackson2.SecurityJackson2Modules;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
-import org.springframework.security.oauth2.core.OAuth2TokenFormat;
-import org.springframework.security.oauth2.server.authorization.config.ClientSettings;
-import org.springframework.security.oauth2.server.authorization.config.ConfigurationSettingNames;
-import org.springframework.security.oauth2.server.authorization.config.TokenSettings;
 import org.springframework.security.oauth2.server.authorization.jackson2.OAuth2AuthorizationServerJackson2Module;
+import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
+import org.springframework.security.oauth2.server.authorization.settings.ConfigurationSettingNames;
+import org.springframework.security.oauth2.server.authorization.settings.OAuth2TokenFormat;
+import org.springframework.security.oauth2.server.authorization.settings.TokenSettings;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
@@ -100,6 +100,8 @@ public class JdbcRegisteredClientRepository implements RegisteredClientRepositor
 			+ " WHERE " + PK_FILTER;
 	// @formatter:on
 
+	private static final String COUNT_REGISTERED_CLIENT_SQL = "SELECT COUNT(*) FROM " + TABLE_NAME + " WHERE ";
+
 	private final JdbcOperations jdbcOperations;
 	private RowMapper<RegisteredClient> registeredClientRowMapper;
 	private Function<RegisteredClient, List<SqlParameterValue>> registeredClientParametersMapper;
@@ -141,9 +143,29 @@ public class JdbcRegisteredClientRepository implements RegisteredClientRepositor
 	}
 
 	private void insertRegisteredClient(RegisteredClient registeredClient) {
+		assertUniqueIdentifiers(registeredClient);
 		List<SqlParameterValue> parameters = this.registeredClientParametersMapper.apply(registeredClient);
 		PreparedStatementSetter pss = new ArgumentPreparedStatementSetter(parameters.toArray());
 		this.jdbcOperations.update(INSERT_REGISTERED_CLIENT_SQL, pss);
+	}
+
+	private void assertUniqueIdentifiers(RegisteredClient registeredClient) {
+		Integer count = this.jdbcOperations.queryForObject(
+				COUNT_REGISTERED_CLIENT_SQL + "client_id = ?",
+				Integer.class,
+				registeredClient.getClientId());
+		if (count != null && count > 0) {
+			throw new IllegalArgumentException("Registered client must be unique. " +
+					"Found duplicate client identifier: " + registeredClient.getClientId());
+		}
+		count = this.jdbcOperations.queryForObject(
+				COUNT_REGISTERED_CLIENT_SQL + "client_secret = ?",
+				Integer.class,
+				registeredClient.getClientSecret());
+		if (count != null && count > 0) {
+			throw new IllegalArgumentException("Registered client must be unique. " +
+					"Found duplicate client secret for identifier: " + registeredClient.getId());
+		}
 	}
 
 	@Override

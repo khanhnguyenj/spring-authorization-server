@@ -29,9 +29,9 @@ import java.util.Set;
 import java.util.function.Function;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.dao.DataRetrievalFailureException;
 import org.springframework.jdbc.core.ArgumentPreparedStatementSetter;
@@ -45,10 +45,8 @@ import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
-import org.springframework.security.oauth2.core.OAuth2AuthorizationCode;
 import org.springframework.security.oauth2.core.OAuth2RefreshToken;
 import org.springframework.security.oauth2.core.OAuth2Token;
-import org.springframework.security.oauth2.core.OAuth2TokenType;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.core.oidc.OidcIdToken;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
@@ -90,7 +88,7 @@ public class JdbcOAuth2AuthorizationServiceTests {
 	private RegisteredClientRepository registeredClientRepository;
 	private JdbcOAuth2AuthorizationService authorizationService;
 
-	@Before
+	@BeforeEach
 	public void setUp() {
 		this.db = createDb();
 		this.jdbcOperations = new JdbcTemplate(this.db);
@@ -98,7 +96,7 @@ public class JdbcOAuth2AuthorizationServiceTests {
 		this.authorizationService = new JdbcOAuth2AuthorizationService(this.jdbcOperations, this.registeredClientRepository);
 	}
 
-	@After
+	@AfterEach
 	public void tearDown() {
 		this.db.shutdown();
 	}
@@ -469,6 +467,7 @@ public class JdbcOAuth2AuthorizationServiceTests {
 				+ "registeredClientId, "
 				+ "principalName, "
 				+ "authorizationGrantType, "
+				+ "authorizedScopes, "
 				+ "attributes, "
 				+ "state, "
 				+ "authorizationCodeValue, "
@@ -505,7 +504,7 @@ public class JdbcOAuth2AuthorizationServiceTests {
 
 		// @formatter:off
 		private static final String SAVE_AUTHORIZATION_SQL = "INSERT INTO " + TABLE_NAME
-				+ " (" + COLUMN_NAMES + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+				+ " (" + COLUMN_NAMES + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 		// @formatter:on
 
 		private static final String REMOVE_AUTHORIZATION_SQL = "DELETE FROM " + TABLE_NAME + " WHERE " + PK_FILTER;
@@ -569,11 +568,17 @@ public class JdbcOAuth2AuthorizationServiceTests {
 				String id = rs.getString("id");
 				String principalName = rs.getString("principalName");
 				String authorizationGrantType = rs.getString("authorizationGrantType");
+				Set<String> authorizedScopes = Collections.emptySet();
+				String authorizedScopesString = rs.getString("authorizedScopes");
+				if (authorizedScopesString != null) {
+					authorizedScopes = StringUtils.commaDelimitedListToSet(authorizedScopesString);
+				}
 				Map<String, Object> attributes = parseMap(rs.getString("attributes"));
 
 				builder.id(id)
 						.principalName(principalName)
 						.authorizationGrantType(new AuthorizationGrantType(authorizationGrantType))
+						.authorizedScopes(authorizedScopes)
 						.attributes((attrs) -> attrs.putAll(attributes));
 
 				String state = rs.getString("state");
@@ -661,6 +666,12 @@ public class JdbcOAuth2AuthorizationServiceTests {
 				parameters.add(new SqlParameterValue(Types.VARCHAR, authorization.getRegisteredClientId()));
 				parameters.add(new SqlParameterValue(Types.VARCHAR, authorization.getPrincipalName()));
 				parameters.add(new SqlParameterValue(Types.VARCHAR, authorization.getAuthorizationGrantType().getValue()));
+
+				String authorizedScopes = null;
+				if (!CollectionUtils.isEmpty(authorization.getAuthorizedScopes())) {
+					authorizedScopes = StringUtils.collectionToDelimitedString(authorization.getAuthorizedScopes(), ",");
+				}
+				parameters.add(new SqlParameterValue(Types.VARCHAR, authorizedScopes));
 
 				String attributes = writeMap(authorization.getAttributes());
 				parameters.add(new SqlParameterValue(Types.VARCHAR, attributes));

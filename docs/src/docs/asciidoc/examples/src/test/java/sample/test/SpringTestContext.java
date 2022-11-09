@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2020-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,17 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package sample.test;
 
 import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.List;
 
-import javax.servlet.Filter;
-import javax.servlet.FilterChain;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor;
 import org.springframework.mock.web.MockServletConfig;
@@ -44,11 +43,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
 /**
- * TODO
- * This class is a straight copy from Spring Security.
- *
  * @author Rob Winch
- * @since 5.0
  */
 public class SpringTestContext implements Closeable {
 
@@ -99,12 +94,6 @@ public class SpringTestContext implements Closeable {
 		this.context = context;
 		return this;
 	}
-
-//	public SpringTestContext context(String configuration) {
-//		InMemoryXmlWebApplicationContext context = new InMemoryXmlWebApplicationContext(configuration);
-//		this.context = context;
-//		return this;
-//	}
 
 	public SpringTestContext mockMvcAfterSpringSecurityOk() {
 		return addFilter(new OncePerRequestFilter() {
