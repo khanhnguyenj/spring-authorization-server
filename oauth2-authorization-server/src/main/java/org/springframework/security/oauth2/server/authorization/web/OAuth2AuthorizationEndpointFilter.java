@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2022 the original author or authors.
+ * Copyright 2020-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,7 @@ package org.springframework.security.oauth2.server.authorization.web;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 
 import jakarta.servlet.FilterChain;
@@ -37,6 +35,7 @@ import org.springframework.security.authentication.AuthenticationDetailsSource;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationResponse;
@@ -56,6 +55,7 @@ import org.springframework.security.web.authentication.AuthenticationConverter;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.security.web.util.RedirectUrlBuilder;
 import org.springframework.security.web.util.UrlUtils;
 import org.springframework.security.web.util.matcher.AndRequestMatcher;
@@ -67,6 +67,7 @@ import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.util.UriUtils;
 
 /**
  * A {@code Filter} for the OAuth 2.0 Authorization Code Grant,
@@ -98,6 +99,7 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 	private AuthenticationConverter authenticationConverter;
 	private AuthenticationSuccessHandler authenticationSuccessHandler = this::sendAuthorizationResponse;
 	private AuthenticationFailureHandler authenticationFailureHandler = this::sendErrorResponse;
+	private SessionAuthenticationStrategy sessionAuthenticationStrategy = (authentication, request, response) -> {};
 	private String consentPage;
 
 	/**
@@ -183,6 +185,9 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 				return;
 			}
 
+			this.sessionAuthenticationStrategy.onAuthentication(
+					authenticationResult, request, response);
+
 			this.authenticationSuccessHandler.onAuthenticationSuccess(
 					request, response, authenticationResult);
 
@@ -237,6 +242,19 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 	public void setAuthenticationFailureHandler(AuthenticationFailureHandler authenticationFailureHandler) {
 		Assert.notNull(authenticationFailureHandler, "authenticationFailureHandler cannot be null");
 		this.authenticationFailureHandler = authenticationFailureHandler;
+	}
+
+	/**
+	 * Sets the {@link SessionAuthenticationStrategy} used for handling an {@link OAuth2AuthorizationCodeRequestAuthenticationToken}
+	 * before calling the {@link AuthenticationSuccessHandler}.
+	 * If OpenID Connect is enabled, the default implementation tracks OpenID Connect sessions using a {@link SessionRegistry}.
+	 *
+	 * @param sessionAuthenticationStrategy the {@link SessionAuthenticationStrategy} used for handling an {@link OAuth2AuthorizationCodeRequestAuthenticationToken}
+	 * @since 1.1.0
+	 */
+	public void setSessionAuthenticationStrategy(SessionAuthenticationStrategy sessionAuthenticationStrategy) {
+		Assert.notNull(sessionAuthenticationStrategy, "sessionAuthenticationStrategy cannot be null");
+		this.sessionAuthenticationStrategy = sessionAuthenticationStrategy;
 	}
 
 	/**
@@ -299,15 +317,12 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 		UriComponentsBuilder uriBuilder = UriComponentsBuilder
 				.fromUriString(authorizationCodeRequestAuthentication.getRedirectUri())
 				.queryParam(OAuth2ParameterNames.CODE, authorizationCodeRequestAuthentication.getAuthorizationCode().getTokenValue());
-		String redirectUri;
 		if (StringUtils.hasText(authorizationCodeRequestAuthentication.getState())) {
-			uriBuilder.queryParam(OAuth2ParameterNames.STATE, "{state}");
-			Map<String, String> queryParams = new HashMap<>();
-			queryParams.put(OAuth2ParameterNames.STATE, authorizationCodeRequestAuthentication.getState());
-			redirectUri = uriBuilder.build(queryParams).toString();
-		} else {
-			redirectUri = uriBuilder.toUriString();
+			uriBuilder.queryParam(
+					OAuth2ParameterNames.STATE,
+					UriUtils.encode(authorizationCodeRequestAuthentication.getState(), StandardCharsets.UTF_8));
 		}
+		String redirectUri = uriBuilder.build(true).toUriString();		// build(true) -> Components are explicitly encoded
 		this.redirectStrategy.sendRedirect(request, response, redirectUri);
 	}
 
@@ -334,20 +349,21 @@ public final class OAuth2AuthorizationEndpointFilter extends OncePerRequestFilte
 				.fromUriString(authorizationCodeRequestAuthentication.getRedirectUri())
 				.queryParam(OAuth2ParameterNames.ERROR, error.getErrorCode());
 		if (StringUtils.hasText(error.getDescription())) {
-			uriBuilder.queryParam(OAuth2ParameterNames.ERROR_DESCRIPTION, error.getDescription());
+			uriBuilder.queryParam(
+					OAuth2ParameterNames.ERROR_DESCRIPTION,
+					UriUtils.encode(error.getDescription(), StandardCharsets.UTF_8));
 		}
 		if (StringUtils.hasText(error.getUri())) {
-			uriBuilder.queryParam(OAuth2ParameterNames.ERROR_URI, error.getUri());
+			uriBuilder.queryParam(
+					OAuth2ParameterNames.ERROR_URI,
+					UriUtils.encode(error.getUri(), StandardCharsets.UTF_8));
 		}
-		String redirectUri;
 		if (StringUtils.hasText(authorizationCodeRequestAuthentication.getState())) {
-			uriBuilder.queryParam(OAuth2ParameterNames.STATE, "{state}");
-			Map<String, String> queryParams = new HashMap<>();
-			queryParams.put(OAuth2ParameterNames.STATE, authorizationCodeRequestAuthentication.getState());
-			redirectUri = uriBuilder.build(queryParams).toString();
-		} else {
-			redirectUri = uriBuilder.toUriString();
+			uriBuilder.queryParam(
+					OAuth2ParameterNames.STATE,
+					UriUtils.encode(authorizationCodeRequestAuthentication.getState(), StandardCharsets.UTF_8));
 		}
+		String redirectUri = uriBuilder.build(true).toUriString();		// build(true) -> Components are explicitly encoded
 		this.redirectStrategy.sendRedirect(request, response, redirectUri);
 	}
 
