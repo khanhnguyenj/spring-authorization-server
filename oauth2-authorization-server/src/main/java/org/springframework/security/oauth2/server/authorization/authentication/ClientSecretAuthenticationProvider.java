@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2022 the original author or authors.
+ * Copyright 2020-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -120,6 +120,13 @@ public final class ClientSecretAuthenticationProvider implements AuthenticationP
 		if (registeredClient.getClientSecretExpiresAt() != null &&
 				Instant.now().isAfter(registeredClient.getClientSecretExpiresAt())) {
 			throwInvalidClient("client_secret_expires_at");
+		}
+
+		if (this.passwordEncoder.upgradeEncoding(registeredClient.getClientSecret())) {
+			registeredClient = RegisteredClient.from(registeredClient)
+					.clientSecret(this.passwordEncoder.encode(clientSecret))
+					.build();
+			this.registeredClientRepository.save(registeredClient);
 		}
 
 		if (this.logger.isTraceEnabled()) {
