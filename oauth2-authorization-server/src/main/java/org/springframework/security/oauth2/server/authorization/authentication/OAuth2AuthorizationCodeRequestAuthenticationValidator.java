@@ -17,7 +17,9 @@ package org.springframework.security.oauth2.server.authorization.authentication;
 
 import java.util.Set;
 import java.util.function.Consumer;
-
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.springframework.core.log.LogMessage;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
@@ -46,6 +48,8 @@ import org.springframework.web.util.UriComponentsBuilder;
  * @see OAuth2AuthorizationCodeRequestAuthenticationProvider#setAuthenticationValidator(Consumer)
  */
 public final class OAuth2AuthorizationCodeRequestAuthenticationValidator implements Consumer<OAuth2AuthorizationCodeRequestAuthenticationContext> {
+    protected static final Log logger = LogFactory.getLog(OAuth2AuthorizationCodeRequestAuthenticationValidator.class);
+    
 	private static final String ERROR_URI = "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1";
 
 	/**
@@ -133,6 +137,10 @@ public final class OAuth2AuthorizationCodeRequestAuthenticationValidator impleme
 				for (String registeredRedirectUri : registeredClient.getRedirectUris()) {
 					UriComponentsBuilder registeredRedirect = UriComponentsBuilder.fromUriString(registeredRedirectUri);
 					registeredRedirect.port(requestedRedirect.getPort());
+					if (logger.isTraceEnabled()) {
+		                logger.trace(String.format("Registered Redirect URI is: %s", registeredRedirect.build().toString()));
+		                logger.trace(String.format("Requested Redirect URI is: %s", requestedRedirect.toString()));
+		            }
 					if (registeredRedirect.build().toString().equals(requestedRedirect.toString())) {
 						validRedirectUri = true;
 						break;
