@@ -58,7 +58,7 @@ import org.springframework.web.util.UriUtils;
  * A {@code Filter} that processes OpenID Connect 1.0 RP-Initiated Logout Requests.
  *
  * @author Joe Grandja
- * @since 1.1.0
+ * @since 1.1
  * @see OidcLogoutAuthenticationConverter
  * @see OidcLogoutAuthenticationProvider
  * @see <a href="https://openid.net/specs/openid-connect-rpinitiated-1_0.html#RPLogout">2. RP-Initiated Logout</a>
@@ -182,7 +182,8 @@ public final class OidcLogoutEndpointFilter extends OncePerRequestFilter {
 		OidcLogoutAuthenticationToken oidcLogoutAuthentication = (OidcLogoutAuthenticationToken) authentication;
 
 		// Check for active user session
-		if (oidcLogoutAuthentication.getSessionInformation() != null) {
+		if (oidcLogoutAuthentication.isPrincipalAuthenticated() &&
+				StringUtils.hasText(oidcLogoutAuthentication.getSessionId())) {
 			// Perform logout
 			this.logoutHandler.logout(request, response,
 					(Authentication) oidcLogoutAuthentication.getPrincipal());

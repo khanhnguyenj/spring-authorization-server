@@ -31,6 +31,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
+import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.core.oidc.endpoint.OidcParameterNames;
 import org.springframework.security.oauth2.server.authorization.InMemoryOAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.InMemoryOAuth2AuthorizationService;
@@ -76,13 +77,13 @@ public class SecurityConfigTests {
 		assertThat(this.authorizationService).isInstanceOf(InMemoryOAuth2AuthorizationService.class);
 		assertThat(this.authorizationConsentService).isInstanceOf(InMemoryOAuth2AuthorizationConsentService.class);
 
-		RegisteredClient registeredClient = this.registeredClientRepository.findByClientId("messaging-client");
+		RegisteredClient registeredClient = this.registeredClientRepository.findByClientId("oidc-client");
 		assertThat(registeredClient).isNotNull();
 
 		AuthorizationCodeGrantFlow authorizationCodeGrantFlow = new AuthorizationCodeGrantFlow(this.mockMvc);
 		authorizationCodeGrantFlow.setUsername("user");
-		authorizationCodeGrantFlow.addScope("message.read");
-		authorizationCodeGrantFlow.addScope("message.write");
+		authorizationCodeGrantFlow.addScope(OidcScopes.OPENID);
+		authorizationCodeGrantFlow.addScope(OidcScopes.PROFILE);
 
 		String state = authorizationCodeGrantFlow.authorize(registeredClient);
 		assertThatAuthorization(state, OAuth2ParameterNames.STATE).isNotNull();
