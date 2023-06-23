@@ -20,6 +20,7 @@ import java.time.Instant;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
+import org.springframework.core.log.LogMessage;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
@@ -114,6 +115,10 @@ public final class ClientSecretAuthenticationProvider implements AuthenticationP
 
 		String clientSecret = clientAuthentication.getCredentials().toString();
 		if (!this.passwordEncoder.matches(clientSecret, registeredClient.getClientSecret())) {
+			if (this.logger.isDebugEnabled()) {
+				this.logger.debug(LogMessage.format("Invalid request: client_secret does not match" +
+						" for registered client '%s'", registeredClient.getId()));
+			}
 			throwInvalidClient(OAuth2ParameterNames.CLIENT_SECRET);
 		}
 
