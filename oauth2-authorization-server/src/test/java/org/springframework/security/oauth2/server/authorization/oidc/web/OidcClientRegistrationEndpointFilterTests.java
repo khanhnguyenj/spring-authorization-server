@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2022 the original author or authors.
+ * Copyright 2020-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,6 +61,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.web.authentication.AuthenticationConverter;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -79,13 +80,16 @@ import static org.mockito.Mockito.when;
  * @author Daniel Garnier-Moiroux
  */
 public class OidcClientRegistrationEndpointFilterTests {
+
 	private static final String DEFAULT_OIDC_CLIENT_REGISTRATION_ENDPOINT_URI = "/connect/register";
+
 	private AuthenticationManager authenticationManager;
+
 	private OidcClientRegistrationEndpointFilter filter;
-	private final HttpMessageConverter<OidcClientRegistration> clientRegistrationHttpMessageConverter =
-			new OidcClientRegistrationHttpMessageConverter();
-	private final HttpMessageConverter<OAuth2Error> errorHttpResponseConverter =
-			new OAuth2ErrorHttpMessageConverter();
+
+	private final HttpMessageConverter<OidcClientRegistration> clientRegistrationHttpMessageConverter = new OidcClientRegistrationHttpMessageConverter();
+
+	private final HttpMessageConverter<OAuth2Error> errorHttpResponseConverter = new OAuth2ErrorHttpMessageConverter();
 
 	@BeforeEach
 	public void setup() {
@@ -100,37 +104,33 @@ public class OidcClientRegistrationEndpointFilterTests {
 
 	@Test
 	public void constructorWhenAuthenticationManagerNullThenThrowIllegalArgumentException() {
-		assertThatIllegalArgumentException()
-				.isThrownBy(() -> new OidcClientRegistrationEndpointFilter(null))
-				.withMessage("authenticationManager cannot be null");
+		assertThatIllegalArgumentException().isThrownBy(() -> new OidcClientRegistrationEndpointFilter(null))
+			.withMessage("authenticationManager cannot be null");
 	}
 
 	@Test
 	public void constructorWhenClientRegistrationEndpointUriNullThenThrowIllegalArgumentException() {
 		assertThatIllegalArgumentException()
-				.isThrownBy(() -> new OidcClientRegistrationEndpointFilter(this.authenticationManager, null))
-				.withMessage("clientRegistrationEndpointUri cannot be empty");
+			.isThrownBy(() -> new OidcClientRegistrationEndpointFilter(this.authenticationManager, null))
+			.withMessage("clientRegistrationEndpointUri cannot be empty");
 	}
 
 	@Test
 	public void setAuthenticationConverterWhenNullThenThrowIllegalArgumentException() {
-		assertThatIllegalArgumentException()
-				.isThrownBy(() -> this.filter.setAuthenticationConverter(null))
-				.withMessage("authenticationConverter cannot be null");
+		assertThatIllegalArgumentException().isThrownBy(() -> this.filter.setAuthenticationConverter(null))
+			.withMessage("authenticationConverter cannot be null");
 	}
 
 	@Test
 	public void setAuthenticationSuccessHandlerWhenNullThenThrowIllegalArgumentException() {
-		assertThatIllegalArgumentException()
-				.isThrownBy(() -> this.filter.setAuthenticationSuccessHandler(null))
-				.withMessage("authenticationSuccessHandler cannot be null");
+		assertThatIllegalArgumentException().isThrownBy(() -> this.filter.setAuthenticationSuccessHandler(null))
+			.withMessage("authenticationSuccessHandler cannot be null");
 	}
 
 	@Test
 	public void setAuthenticationFailureHandlerWhenNullThenThrowIllegalArgumentException() {
-		assertThatIllegalArgumentException()
-				.isThrownBy(() -> this.filter.setAuthenticationFailureHandler(null))
-				.withMessage("authenticationFailureHandler cannot be null");
+		assertThatIllegalArgumentException().isThrownBy(() -> this.filter.setAuthenticationFailureHandler(null))
+			.withMessage("authenticationFailureHandler cannot be null");
 	}
 
 	@Test
@@ -180,28 +180,26 @@ public class OidcClientRegistrationEndpointFilterTests {
 
 	@Test
 	public void doFilterWhenClientRegistrationRequestInvalidTokenThenUnauthorizedError() throws Exception {
-		doFilterWhenClientRegistrationRequestInvalidThenError(
-				OAuth2ErrorCodes.INVALID_TOKEN, HttpStatus.UNAUTHORIZED);
+		doFilterWhenClientRegistrationRequestInvalidThenError(OAuth2ErrorCodes.INVALID_TOKEN, HttpStatus.UNAUTHORIZED);
 	}
 
 	@Test
 	public void doFilterWhenClientRegistrationRequestInsufficientTokenScopeThenForbiddenError() throws Exception {
-		doFilterWhenClientRegistrationRequestInvalidThenError(
-				OAuth2ErrorCodes.INSUFFICIENT_SCOPE, HttpStatus.FORBIDDEN);
+		doFilterWhenClientRegistrationRequestInvalidThenError(OAuth2ErrorCodes.INSUFFICIENT_SCOPE,
+				HttpStatus.FORBIDDEN);
 	}
 
-	private void doFilterWhenClientRegistrationRequestInvalidThenError(
-			String errorCode, HttpStatus status) throws Exception {
+	private void doFilterWhenClientRegistrationRequestInvalidThenError(String errorCode, HttpStatus status)
+			throws Exception {
 		Jwt jwt = createJwt("client.create");
-		JwtAuthenticationToken principal = new JwtAuthenticationToken(
-				jwt, AuthorityUtils.createAuthorityList("SCOPE_client.create"));
+		JwtAuthenticationToken principal = new JwtAuthenticationToken(jwt,
+				AuthorityUtils.createAuthorityList("SCOPE_client.create"));
 
 		SecurityContext securityContext = SecurityContextHolder.createEmptyContext();
 		securityContext.setAuthentication(principal);
 		SecurityContextHolder.setContext(securityContext);
 
-		when(this.authenticationManager.authenticate(any()))
-				.thenThrow(new OAuth2AuthenticationException(errorCode));
+		when(this.authenticationManager.authenticate(any())).thenThrow(new OAuth2AuthenticationException(errorCode));
 
 		// @formatter:off
 		OidcClientRegistration clientRegistrationRequest = OidcClientRegistration.builder()
@@ -244,11 +242,11 @@ public class OidcClientRegistrationEndpointFilterTests {
 		// @formatter:on
 
 		Jwt jwt = createJwt("client.create");
-		JwtAuthenticationToken principal = new JwtAuthenticationToken(
-				jwt, AuthorityUtils.createAuthorityList("SCOPE_client.create"));
+		JwtAuthenticationToken principal = new JwtAuthenticationToken(jwt,
+				AuthorityUtils.createAuthorityList("SCOPE_client.create"));
 
-		OidcClientRegistrationAuthenticationToken clientRegistrationAuthenticationResult =
-				new OidcClientRegistrationAuthenticationToken(principal, expectedClientRegistrationResponse);
+		OidcClientRegistrationAuthenticationToken clientRegistrationAuthenticationResult = new OidcClientRegistrationAuthenticationToken(
+				principal, expectedClientRegistrationResponse);
 
 		when(this.authenticationManager.authenticate(any())).thenReturn(clientRegistrationAuthenticationResult);
 
@@ -270,29 +268,33 @@ public class OidcClientRegistrationEndpointFilterTests {
 
 		assertThat(response.getStatus()).isEqualTo(HttpStatus.CREATED.value());
 		OidcClientRegistration clientRegistrationResponse = readClientRegistrationResponse(response);
-		assertThat(clientRegistrationResponse.getClientId()).isEqualTo(expectedClientRegistrationResponse.getClientId());
+		assertThat(clientRegistrationResponse.getClientId())
+			.isEqualTo(expectedClientRegistrationResponse.getClientId());
 		assertThat(clientRegistrationResponse.getClientIdIssuedAt()).isBetween(
 				expectedClientRegistrationResponse.getClientIdIssuedAt().minusSeconds(1),
 				expectedClientRegistrationResponse.getClientIdIssuedAt().plusSeconds(1));
-		assertThat(clientRegistrationResponse.getClientSecret()).isEqualTo(expectedClientRegistrationResponse.getClientSecret());
-		assertThat(clientRegistrationResponse.getClientSecretExpiresAt()).isEqualTo(expectedClientRegistrationResponse.getClientSecretExpiresAt());
-		assertThat(clientRegistrationResponse.getClientName()).isEqualTo(expectedClientRegistrationResponse.getClientName());
+		assertThat(clientRegistrationResponse.getClientSecret())
+			.isEqualTo(expectedClientRegistrationResponse.getClientSecret());
+		assertThat(clientRegistrationResponse.getClientSecretExpiresAt())
+			.isEqualTo(expectedClientRegistrationResponse.getClientSecretExpiresAt());
+		assertThat(clientRegistrationResponse.getClientName())
+			.isEqualTo(expectedClientRegistrationResponse.getClientName());
 		assertThat(clientRegistrationResponse.getRedirectUris())
-				.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getRedirectUris());
+			.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getRedirectUris());
 		assertThat(clientRegistrationResponse.getGrantTypes())
-				.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getGrantTypes());
+			.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getGrantTypes());
 		assertThat(clientRegistrationResponse.getResponseTypes())
-				.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getResponseTypes());
+			.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getResponseTypes());
 		assertThat(clientRegistrationResponse.getScopes())
-				.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getScopes());
+			.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getScopes());
 		assertThat(clientRegistrationResponse.getTokenEndpointAuthenticationMethod())
-				.isEqualTo(expectedClientRegistrationResponse.getTokenEndpointAuthenticationMethod());
+			.isEqualTo(expectedClientRegistrationResponse.getTokenEndpointAuthenticationMethod());
 		assertThat(clientRegistrationResponse.getIdTokenSignedResponseAlgorithm())
-				.isEqualTo(expectedClientRegistrationResponse.getIdTokenSignedResponseAlgorithm());
+			.isEqualTo(expectedClientRegistrationResponse.getIdTokenSignedResponseAlgorithm());
 		assertThat(clientRegistrationResponse.getRegistrationAccessToken())
-				.isEqualTo(expectedClientRegistrationResponse.getRegistrationAccessToken());
+			.isEqualTo(expectedClientRegistrationResponse.getRegistrationAccessToken());
 		assertThat(clientRegistrationResponse.getRegistrationClientUrl())
-				.isEqualTo(expectedClientRegistrationResponse.getRegistrationClientUrl());
+			.isEqualTo(expectedClientRegistrationResponse.getRegistrationClientUrl());
 	}
 
 	@Test
@@ -327,6 +329,7 @@ public class OidcClientRegistrationEndpointFilterTests {
 		MockHttpServletRequest request = new MockHttpServletRequest("GET", requestUri);
 		request.setServletPath(requestUri);
 		request.addParameter(OAuth2ParameterNames.CLIENT_ID, "");
+		updateQueryString(request);
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		FilterChain filterChain = mock(FilterChain.class);
 
@@ -342,6 +345,7 @@ public class OidcClientRegistrationEndpointFilterTests {
 		request.setServletPath(requestUri);
 		request.addParameter(OAuth2ParameterNames.CLIENT_ID, "client-id");
 		request.addParameter(OAuth2ParameterNames.CLIENT_ID, "client-id2");
+		updateQueryString(request);
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		FilterChain filterChain = mock(FilterChain.class);
 
@@ -355,39 +359,38 @@ public class OidcClientRegistrationEndpointFilterTests {
 
 	@Test
 	public void doFilterWhenClientConfigurationRequestInvalidTokenThenUnauthorizedError() throws Exception {
-		doFilterWhenClientConfigurationRequestInvalidThenError(
-				OAuth2ErrorCodes.INVALID_TOKEN, HttpStatus.UNAUTHORIZED);
+		doFilterWhenClientConfigurationRequestInvalidThenError(OAuth2ErrorCodes.INVALID_TOKEN, HttpStatus.UNAUTHORIZED);
 	}
 
 	@Test
 	public void doFilterWhenClientConfigurationRequestInsufficientScopeThenForbiddenError() throws Exception {
-		doFilterWhenClientConfigurationRequestInvalidThenError(
-				OAuth2ErrorCodes.INSUFFICIENT_SCOPE, HttpStatus.FORBIDDEN);
+		doFilterWhenClientConfigurationRequestInvalidThenError(OAuth2ErrorCodes.INSUFFICIENT_SCOPE,
+				HttpStatus.FORBIDDEN);
 	}
 
 	@Test
 	public void doFilterWhenClientConfigurationRequestInvalidClientThenUnauthorizedError() throws Exception {
-		doFilterWhenClientConfigurationRequestInvalidThenError(
-				OAuth2ErrorCodes.INVALID_CLIENT, HttpStatus.UNAUTHORIZED);
+		doFilterWhenClientConfigurationRequestInvalidThenError(OAuth2ErrorCodes.INVALID_CLIENT,
+				HttpStatus.UNAUTHORIZED);
 	}
 
-	private void doFilterWhenClientConfigurationRequestInvalidThenError(
-			String errorCode, HttpStatus status) throws Exception {
+	private void doFilterWhenClientConfigurationRequestInvalidThenError(String errorCode, HttpStatus status)
+			throws Exception {
 		Jwt jwt = createJwt("client.read");
-		JwtAuthenticationToken principal = new JwtAuthenticationToken(
-				jwt, AuthorityUtils.createAuthorityList("SCOPE_client.read"));
+		JwtAuthenticationToken principal = new JwtAuthenticationToken(jwt,
+				AuthorityUtils.createAuthorityList("SCOPE_client.read"));
 
 		SecurityContext securityContext = SecurityContextHolder.createEmptyContext();
 		securityContext.setAuthentication(principal);
 		SecurityContextHolder.setContext(securityContext);
 
-		when(this.authenticationManager.authenticate(any()))
-				.thenThrow(new OAuth2AuthenticationException(errorCode));
+		when(this.authenticationManager.authenticate(any())).thenThrow(new OAuth2AuthenticationException(errorCode));
 
 		String requestUri = DEFAULT_OIDC_CLIENT_REGISTRATION_ENDPOINT_URI;
 		MockHttpServletRequest request = new MockHttpServletRequest("GET", requestUri);
 		request.setServletPath(requestUri);
 		request.setParameter(OAuth2ParameterNames.CLIENT_ID, "client1");
+		updateQueryString(request);
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		FilterChain filterChain = mock(FilterChain.class);
 
@@ -405,11 +408,11 @@ public class OidcClientRegistrationEndpointFilterTests {
 		OidcClientRegistration expectedClientRegistrationResponse = createClientRegistration();
 
 		Jwt jwt = createJwt("client.read");
-		JwtAuthenticationToken principal = new JwtAuthenticationToken(
-				jwt, AuthorityUtils.createAuthorityList("SCOPE_client.read"));
+		JwtAuthenticationToken principal = new JwtAuthenticationToken(jwt,
+				AuthorityUtils.createAuthorityList("SCOPE_client.read"));
 
-		OidcClientRegistrationAuthenticationToken clientConfigurationAuthenticationResult =
-				new OidcClientRegistrationAuthenticationToken(principal, expectedClientRegistrationResponse);
+		OidcClientRegistrationAuthenticationToken clientConfigurationAuthenticationResult = new OidcClientRegistrationAuthenticationToken(
+				principal, expectedClientRegistrationResponse);
 
 		when(this.authenticationManager.authenticate(any())).thenReturn(clientConfigurationAuthenticationResult);
 
@@ -421,6 +424,7 @@ public class OidcClientRegistrationEndpointFilterTests {
 		MockHttpServletRequest request = new MockHttpServletRequest("GET", requestUri);
 		request.setServletPath(requestUri);
 		request.setParameter(OAuth2ParameterNames.CLIENT_ID, expectedClientRegistrationResponse.getClientId());
+		updateQueryString(request);
 
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		FilterChain filterChain = mock(FilterChain.class);
@@ -431,27 +435,31 @@ public class OidcClientRegistrationEndpointFilterTests {
 
 		assertThat(response.getStatus()).isEqualTo(HttpStatus.OK.value());
 		OidcClientRegistration clientRegistrationResponse = readClientRegistrationResponse(response);
-		assertThat(clientRegistrationResponse.getClientId()).isEqualTo(expectedClientRegistrationResponse.getClientId());
+		assertThat(clientRegistrationResponse.getClientId())
+			.isEqualTo(expectedClientRegistrationResponse.getClientId());
 		assertThat(clientRegistrationResponse.getClientIdIssuedAt()).isBetween(
 				expectedClientRegistrationResponse.getClientIdIssuedAt().minusSeconds(1),
 				expectedClientRegistrationResponse.getClientIdIssuedAt().plusSeconds(1));
-		assertThat(clientRegistrationResponse.getClientSecret()).isEqualTo(expectedClientRegistrationResponse.getClientSecret());
-		assertThat(clientRegistrationResponse.getClientSecretExpiresAt()).isEqualTo(expectedClientRegistrationResponse.getClientSecretExpiresAt());
-		assertThat(clientRegistrationResponse.getClientName()).isEqualTo(expectedClientRegistrationResponse.getClientName());
+		assertThat(clientRegistrationResponse.getClientSecret())
+			.isEqualTo(expectedClientRegistrationResponse.getClientSecret());
+		assertThat(clientRegistrationResponse.getClientSecretExpiresAt())
+			.isEqualTo(expectedClientRegistrationResponse.getClientSecretExpiresAt());
+		assertThat(clientRegistrationResponse.getClientName())
+			.isEqualTo(expectedClientRegistrationResponse.getClientName());
 		assertThat(clientRegistrationResponse.getRedirectUris())
-				.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getRedirectUris());
+			.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getRedirectUris());
 		assertThat(clientRegistrationResponse.getGrantTypes())
-				.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getGrantTypes());
+			.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getGrantTypes());
 		assertThat(clientRegistrationResponse.getResponseTypes())
-				.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getResponseTypes());
+			.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getResponseTypes());
 		assertThat(clientRegistrationResponse.getScopes())
-				.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getScopes());
+			.containsExactlyInAnyOrderElementsOf(expectedClientRegistrationResponse.getScopes());
 		assertThat(clientRegistrationResponse.getTokenEndpointAuthenticationMethod())
-				.isEqualTo(expectedClientRegistrationResponse.getTokenEndpointAuthenticationMethod());
+			.isEqualTo(expectedClientRegistrationResponse.getTokenEndpointAuthenticationMethod());
 		assertThat(clientRegistrationResponse.getIdTokenSignedResponseAlgorithm())
-				.isEqualTo(expectedClientRegistrationResponse.getIdTokenSignedResponseAlgorithm());
+			.isEqualTo(expectedClientRegistrationResponse.getIdTokenSignedResponseAlgorithm());
 		assertThat(clientRegistrationResponse.getRegistrationClientUrl())
-				.isEqualTo(expectedClientRegistrationResponse.getRegistrationClientUrl());
+			.isEqualTo(expectedClientRegistrationResponse.getRegistrationClientUrl());
 	}
 
 	@Test
@@ -463,6 +471,7 @@ public class OidcClientRegistrationEndpointFilterTests {
 		MockHttpServletRequest request = new MockHttpServletRequest("GET", requestUri);
 		request.setServletPath(requestUri);
 		request.setParameter(OAuth2ParameterNames.CLIENT_ID, "client-id");
+		updateQueryString(request);
 
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		FilterChain filterChain = mock(FilterChain.class);
@@ -477,8 +486,8 @@ public class OidcClientRegistrationEndpointFilterTests {
 		OidcClientRegistration expectedClientRegistrationResponse = createClientRegistration();
 		Authentication principal = new TestingAuthenticationToken("principal", "Credentials");
 
-		OidcClientRegistrationAuthenticationToken clientRegistrationAuthenticationResult =
-				new OidcClientRegistrationAuthenticationToken(principal, expectedClientRegistrationResponse);
+		OidcClientRegistrationAuthenticationToken clientRegistrationAuthenticationResult = new OidcClientRegistrationAuthenticationToken(
+				principal, expectedClientRegistrationResponse);
 
 		when(this.authenticationManager.authenticate(any())).thenReturn(clientRegistrationAuthenticationResult);
 		AuthenticationSuccessHandler successHandler = mock(AuthenticationSuccessHandler.class);
@@ -492,6 +501,7 @@ public class OidcClientRegistrationEndpointFilterTests {
 		MockHttpServletRequest request = new MockHttpServletRequest("GET", requestUri);
 		request.setServletPath(requestUri);
 		request.setParameter(OAuth2ParameterNames.CLIENT_ID, expectedClientRegistrationResponse.getClientId());
+		updateQueryString(request);
 
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		FilterChain filterChain = mock(FilterChain.class);
@@ -507,12 +517,13 @@ public class OidcClientRegistrationEndpointFilterTests {
 		this.filter.setAuthenticationFailureHandler(authenticationFailureHandler);
 
 		when(this.authenticationManager.authenticate(any()))
-				.thenThrow(new OAuth2AuthenticationException(OAuth2ErrorCodes.INVALID_TOKEN));
+			.thenThrow(new OAuth2AuthenticationException(OAuth2ErrorCodes.INVALID_TOKEN));
 
 		String requestUri = DEFAULT_OIDC_CLIENT_REGISTRATION_ENDPOINT_URI;
 		MockHttpServletRequest request = new MockHttpServletRequest("GET", requestUri);
 		request.setServletPath(requestUri);
 		request.setParameter(OAuth2ParameterNames.CLIENT_ID, "client1");
+		updateQueryString(request);
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		FilterChain filterChain = mock(FilterChain.class);
 
@@ -522,9 +533,21 @@ public class OidcClientRegistrationEndpointFilterTests {
 				any(OAuth2AuthenticationException.class));
 	}
 
+	private static void updateQueryString(MockHttpServletRequest request) {
+		UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromUriString(request.getRequestURI());
+		request.getParameterMap().forEach((key, values) -> {
+			if (values.length > 0) {
+				for (String value : values) {
+					uriBuilder.queryParam(key, value);
+				}
+			}
+		});
+		request.setQueryString(uriBuilder.build().getQuery());
+	}
+
 	private OAuth2Error readError(MockHttpServletResponse response) throws Exception {
-		MockClientHttpResponse httpResponse = new MockClientHttpResponse(
-				response.getContentAsByteArray(), HttpStatus.valueOf(response.getStatus()));
+		MockClientHttpResponse httpResponse = new MockClientHttpResponse(response.getContentAsByteArray(),
+				HttpStatus.valueOf(response.getStatus()));
 		return this.errorHttpResponseConverter.read(OAuth2Error.class, httpResponse);
 	}
 
@@ -536,8 +559,8 @@ public class OidcClientRegistrationEndpointFilterTests {
 	}
 
 	private OidcClientRegistration readClientRegistrationResponse(MockHttpServletResponse response) throws Exception {
-		MockClientHttpResponse httpResponse = new MockClientHttpResponse(
-				response.getContentAsByteArray(), HttpStatus.valueOf(response.getStatus()));
+		MockClientHttpResponse httpResponse = new MockClientHttpResponse(response.getContentAsByteArray(),
+				HttpStatus.valueOf(response.getStatus()));
 		return this.clientRegistrationHttpMessageConverter.read(OidcClientRegistration.class, httpResponse);
 	}
 

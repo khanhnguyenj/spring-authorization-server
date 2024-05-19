@@ -41,9 +41,13 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
  * @author Steve Riesenberg
  */
 public class OAuth2DeviceAuthorizationConsentAuthenticationConverterTests {
+
 	private static final String VERIFICATION_URI = "/oauth2/device_verification";
+
 	private static final String USER_CODE = "BCDF-GHJK";
+
 	private static final String CLIENT_ID = "client-1";
+
 	private static final String STATE = "abc123";
 
 	private OAuth2DeviceAuthorizationConsentAuthenticationConverter converter;
@@ -148,6 +152,22 @@ public class OAuth2DeviceAuthorizationConsentAuthenticationConverterTests {
 	}
 
 	@Test
+	public void convertWhenInvalidUserCodeThenInvalidRequestError() {
+		MockHttpServletRequest request = createRequest();
+		request.addParameter(OAuth2ParameterNames.STATE, STATE);
+		request.addParameter(OAuth2ParameterNames.CLIENT_ID, CLIENT_ID);
+		request.addParameter(OAuth2ParameterNames.USER_CODE, "LONG-USER-CODE");
+		// @formatter:off
+		assertThatExceptionOfType(OAuth2AuthenticationException.class)
+				.isThrownBy(() -> this.converter.convert(request))
+				.withMessageContaining(OAuth2ParameterNames.USER_CODE)
+				.extracting(OAuth2AuthenticationException::getError)
+				.extracting(OAuth2Error::getErrorCode)
+				.isEqualTo(OAuth2ErrorCodes.INVALID_REQUEST);
+		// @formatter:on
+	}
+
+	@Test
 	public void convertWhenMultipleUserCodeParametersThenInvalidRequestError() {
 		MockHttpServletRequest request = createRequest();
 		request.addParameter(OAuth2ParameterNames.STATE, STATE);
@@ -204,8 +224,8 @@ public class OAuth2DeviceAuthorizationConsentAuthenticationConverterTests {
 		request.addParameter(OAuth2ParameterNames.CLIENT_ID, CLIENT_ID);
 		request.addParameter(OAuth2ParameterNames.USER_CODE, USER_CODE);
 
-		OAuth2DeviceAuthorizationConsentAuthenticationToken authentication =
-				(OAuth2DeviceAuthorizationConsentAuthenticationToken) this.converter.convert(request);
+		OAuth2DeviceAuthorizationConsentAuthenticationToken authentication = (OAuth2DeviceAuthorizationConsentAuthenticationToken) this.converter
+			.convert(request);
 		assertThat(authentication).isNotNull();
 		assertThat(authentication.getAuthorizationUri()).endsWith(VERIFICATION_URI);
 		assertThat(authentication.getClientId()).isEqualTo(CLIENT_ID);
@@ -226,8 +246,8 @@ public class OAuth2DeviceAuthorizationConsentAuthenticationConverterTests {
 		securityContext.setAuthentication(new TestingAuthenticationToken("user", null));
 		SecurityContextHolder.setContext(securityContext);
 
-		OAuth2DeviceAuthorizationConsentAuthenticationToken authentication =
-				(OAuth2DeviceAuthorizationConsentAuthenticationToken) this.converter.convert(request);
+		OAuth2DeviceAuthorizationConsentAuthenticationToken authentication = (OAuth2DeviceAuthorizationConsentAuthenticationToken) this.converter
+			.convert(request);
 		assertThat(authentication).isNotNull();
 		assertThat(authentication.getAuthorizationUri()).endsWith(VERIFICATION_URI);
 		assertThat(authentication.getClientId()).isEqualTo(CLIENT_ID);
@@ -252,17 +272,16 @@ public class OAuth2DeviceAuthorizationConsentAuthenticationConverterTests {
 		securityContext.setAuthentication(new TestingAuthenticationToken("user", null));
 		SecurityContextHolder.setContext(securityContext);
 
-		OAuth2DeviceAuthorizationConsentAuthenticationToken authentication =
-				(OAuth2DeviceAuthorizationConsentAuthenticationToken) this.converter.convert(request);
+		OAuth2DeviceAuthorizationConsentAuthenticationToken authentication = (OAuth2DeviceAuthorizationConsentAuthenticationToken) this.converter
+			.convert(request);
 		assertThat(authentication).isNotNull();
 		assertThat(authentication.getAuthorizationUri()).endsWith(VERIFICATION_URI);
 		assertThat(authentication.getClientId()).isEqualTo(CLIENT_ID);
 		assertThat(authentication.getPrincipal()).isInstanceOf(TestingAuthenticationToken.class);
 		assertThat(authentication.getUserCode()).isEqualTo(USER_CODE);
 		assertThat(authentication.getScopes()).containsExactly("message.read", "message.write");
-		assertThat(authentication.getAdditionalParameters())
-				.containsExactly(entry("param-1", "value-1"),
-					entry("param-2", new String[] {"value-1", "value-2"}));
+		assertThat(authentication.getAdditionalParameters()).containsExactly(entry("param-1", "value-1"),
+				entry("param-2", new String[] { "value-1", "value-2" }));
 	}
 
 	@Test
@@ -276,8 +295,8 @@ public class OAuth2DeviceAuthorizationConsentAuthenticationConverterTests {
 		securityContext.setAuthentication(new TestingAuthenticationToken("user", null));
 		SecurityContextHolder.setContext(securityContext);
 
-		OAuth2DeviceAuthorizationConsentAuthenticationToken authentication =
-				(OAuth2DeviceAuthorizationConsentAuthenticationToken) this.converter.convert(request);
+		OAuth2DeviceAuthorizationConsentAuthenticationToken authentication = (OAuth2DeviceAuthorizationConsentAuthenticationToken) this.converter
+			.convert(request);
 		assertThat(authentication).isNotNull();
 		assertThat(authentication.getAuthorizationUri()).endsWith(VERIFICATION_URI);
 		assertThat(authentication.getClientId()).isEqualTo(CLIENT_ID);
@@ -293,4 +312,5 @@ public class OAuth2DeviceAuthorizationConsentAuthenticationConverterTests {
 		request.setRequestURI(VERIFICATION_URI);
 		return request;
 	}
+
 }

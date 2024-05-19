@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2023 the original author or authors.
+ * Copyright 2020-2024 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,16 +17,19 @@ package org.springframework.security.oauth2.server.authorization.config.annotati
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
 import java.util.function.Consumer;
+
+import javax.crypto.spec.SecretKeySpec;
+
+import jakarta.servlet.http.HttpServletResponse;
 
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
-import jakarta.servlet.http.HttpServletResponse;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterAll;
@@ -59,8 +62,6 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
-import org.springframework.security.crypto.keygen.Base64StringKeyGenerator;
-import org.springframework.security.crypto.keygen.StringKeyGenerator;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
@@ -92,11 +93,12 @@ import org.springframework.security.oauth2.server.authorization.oidc.OidcClientR
 import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcClientConfigurationAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcClientRegistrationAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcClientRegistrationAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.oidc.converter.OidcClientRegistrationRegisteredClientConverter;
+import org.springframework.security.oauth2.server.authorization.oidc.converter.RegisteredClientOidcClientRegistrationConverter;
 import org.springframework.security.oauth2.server.authorization.oidc.http.converter.OidcClientRegistrationHttpMessageConverter;
 import org.springframework.security.oauth2.server.authorization.oidc.web.authentication.OidcClientRegistrationAuthenticationConverter;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
-import org.springframework.security.oauth2.server.authorization.settings.TokenSettings;
 import org.springframework.security.oauth2.server.authorization.test.SpringTestContext;
 import org.springframework.security.oauth2.server.authorization.test.SpringTestContextExtension;
 import org.springframework.security.web.SecurityFilterChain;
@@ -131,18 +133,27 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * @author Ovidiu Popa
  * @author Joe Grandja
+ * @author Dmitriy Dubson
  */
 @ExtendWith(SpringTestContextExtension.class)
 public class OidcClientRegistrationTests {
+
+	private static final String ISSUER = "https://example.com:8443/issuer1";
+
 	private static final String DEFAULT_TOKEN_ENDPOINT_URI = "/oauth2/token";
+
 	private static final String DEFAULT_OIDC_CLIENT_REGISTRATION_ENDPOINT_URI = "/connect/register";
-	private static final HttpMessageConverter<OAuth2AccessTokenResponse> accessTokenHttpResponseConverter =
-			new OAuth2AccessTokenResponseHttpMessageConverter();
-	private static final HttpMessageConverter<OidcClientRegistration> clientRegistrationHttpMessageConverter =
-			new OidcClientRegistrationHttpMessageConverter();
+
+	private static final HttpMessageConverter<OAuth2AccessTokenResponse> accessTokenHttpResponseConverter = new OAuth2AccessTokenResponseHttpMessageConverter();
+
+	private static final HttpMessageConverter<OidcClientRegistration> clientRegistrationHttpMessageConverter = new OidcClientRegistrationHttpMessageConverter();
+
 	private static EmbeddedDatabase db;
+
 	private static JWKSource<SecurityContext> jwkSource;
+
 	private static JWKSet clientJwkSet;
+
 	private static JwtEncoder jwtClientAssertionEncoder;
 
 	public final SpringTestContext spring = new SpringTestContext();
@@ -172,22 +183,23 @@ public class OidcClientRegistrationTests {
 	private static AuthenticationFailureHandler authenticationFailureHandler;
 
 	private MockWebServer server;
-	private String clientJwkSetUrl;
 
+	private String clientJwkSetUrl;
 
 	@BeforeAll
 	public static void init() {
 		JWKSet jwkSet = new JWKSet(TestJwks.DEFAULT_RSA_JWK);
 		jwkSource = (jwkSelector, securityContext) -> jwkSelector.select(jwkSet);
 		clientJwkSet = new JWKSet(TestJwks.generateRsaJwk().build());
-		jwtClientAssertionEncoder = new NimbusJwtEncoder((jwkSelector, securityContext) -> jwkSelector.select(clientJwkSet));
-		db = new EmbeddedDatabaseBuilder()
-				.generateUniqueName(true)
-				.setType(EmbeddedDatabaseType.HSQL)
-				.setScriptEncoding("UTF-8")
-				.addScript("org/springframework/security/oauth2/server/authorization/oauth2-authorization-schema.sql")
-				.addScript("org/springframework/security/oauth2/server/authorization/client/oauth2-registered-client-schema.sql")
-				.build();
+		jwtClientAssertionEncoder = new NimbusJwtEncoder(
+				(jwkSelector, securityContext) -> jwkSelector.select(clientJwkSet));
+		db = new EmbeddedDatabaseBuilder().generateUniqueName(true)
+			.setType(EmbeddedDatabaseType.HSQL)
+			.setScriptEncoding("UTF-8")
+			.addScript("org/springframework/security/oauth2/server/authorization/oauth2-authorization-schema.sql")
+			.addScript(
+					"org/springframework/security/oauth2/server/authorization/client/oauth2-registered-client-schema.sql")
+			.build();
 		authenticationConverter = mock(AuthenticationConverter.class);
 		authenticationConvertersConsumer = mock(Consumer.class);
 		authenticationProvider = mock(AuthenticationProvider.class);
@@ -251,17 +263,17 @@ public class OidcClientRegistrationTests {
 		assertThat(clientRegistrationResponse.getClientSecretExpiresAt()).isNull();
 		assertThat(clientRegistrationResponse.getClientName()).isEqualTo(clientRegistration.getClientName());
 		assertThat(clientRegistrationResponse.getRedirectUris())
-				.containsExactlyInAnyOrderElementsOf(clientRegistration.getRedirectUris());
+			.containsExactlyInAnyOrderElementsOf(clientRegistration.getRedirectUris());
 		assertThat(clientRegistrationResponse.getGrantTypes())
-				.containsExactlyInAnyOrderElementsOf(clientRegistration.getGrantTypes());
+			.containsExactlyInAnyOrderElementsOf(clientRegistration.getGrantTypes());
 		assertThat(clientRegistrationResponse.getResponseTypes())
-				.containsExactly(OAuth2AuthorizationResponseType.CODE.getValue());
+			.containsExactly(OAuth2AuthorizationResponseType.CODE.getValue());
 		assertThat(clientRegistrationResponse.getScopes())
-				.containsExactlyInAnyOrderElementsOf(clientRegistration.getScopes());
+			.containsExactlyInAnyOrderElementsOf(clientRegistration.getScopes());
 		assertThat(clientRegistrationResponse.getTokenEndpointAuthenticationMethod())
-				.isEqualTo(ClientAuthenticationMethod.CLIENT_SECRET_BASIC.getValue());
+			.isEqualTo(ClientAuthenticationMethod.CLIENT_SECRET_BASIC.getValue());
 		assertThat(clientRegistrationResponse.getIdTokenSignedResponseAlgorithm())
-				.isEqualTo(SignatureAlgorithm.RS256.getName());
+			.isEqualTo(SignatureAlgorithm.RS256.getName());
 		assertThat(clientRegistrationResponse.getRegistrationClientUrl()).isNotNull();
 		assertThat(clientRegistrationResponse.getRegistrationAccessToken()).isNotEmpty();
 	}
@@ -286,34 +298,36 @@ public class OidcClientRegistrationTests {
 		HttpHeaders httpHeaders = new HttpHeaders();
 		httpHeaders.setBearerAuth(clientRegistrationResponse.getRegistrationAccessToken());
 
-		MvcResult mvcResult = this.mvc.perform(get(clientRegistrationResponse.getRegistrationClientUrl().toURI())
-				.headers(httpHeaders))
-				.andExpect(status().isOk())
-				.andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("no-store")))
-				.andExpect(header().string(HttpHeaders.PRAGMA, containsString("no-cache")))
-				.andReturn();
+		MvcResult mvcResult = this.mvc
+			.perform(get(clientRegistrationResponse.getRegistrationClientUrl().toURI()).headers(httpHeaders))
+			.andExpect(status().isOk())
+			.andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("no-store")))
+			.andExpect(header().string(HttpHeaders.PRAGMA, containsString("no-cache")))
+			.andReturn();
 
 		OidcClientRegistration clientConfigurationResponse = readClientRegistrationResponse(mvcResult.getResponse());
 
 		assertThat(clientConfigurationResponse.getClientId()).isEqualTo(clientRegistrationResponse.getClientId());
-		assertThat(clientConfigurationResponse.getClientIdIssuedAt()).isEqualTo(clientRegistrationResponse.getClientIdIssuedAt());
+		assertThat(clientConfigurationResponse.getClientIdIssuedAt())
+			.isEqualTo(clientRegistrationResponse.getClientIdIssuedAt());
 		assertThat(clientConfigurationResponse.getClientSecret()).isNotNull();
-		assertThat(clientConfigurationResponse.getClientSecretExpiresAt()).isEqualTo(clientRegistrationResponse.getClientSecretExpiresAt());
+		assertThat(clientConfigurationResponse.getClientSecretExpiresAt())
+			.isEqualTo(clientRegistrationResponse.getClientSecretExpiresAt());
 		assertThat(clientConfigurationResponse.getClientName()).isEqualTo(clientRegistrationResponse.getClientName());
 		assertThat(clientConfigurationResponse.getRedirectUris())
-				.containsExactlyInAnyOrderElementsOf(clientRegistrationResponse.getRedirectUris());
+			.containsExactlyInAnyOrderElementsOf(clientRegistrationResponse.getRedirectUris());
 		assertThat(clientConfigurationResponse.getGrantTypes())
-				.containsExactlyInAnyOrderElementsOf(clientRegistrationResponse.getGrantTypes());
+			.containsExactlyInAnyOrderElementsOf(clientRegistrationResponse.getGrantTypes());
 		assertThat(clientConfigurationResponse.getResponseTypes())
-				.containsExactlyInAnyOrderElementsOf(clientRegistrationResponse.getResponseTypes());
+			.containsExactlyInAnyOrderElementsOf(clientRegistrationResponse.getResponseTypes());
 		assertThat(clientConfigurationResponse.getScopes())
-				.containsExactlyInAnyOrderElementsOf(clientRegistrationResponse.getScopes());
+			.containsExactlyInAnyOrderElementsOf(clientRegistrationResponse.getScopes());
 		assertThat(clientConfigurationResponse.getTokenEndpointAuthenticationMethod())
-				.isEqualTo(clientRegistrationResponse.getTokenEndpointAuthenticationMethod());
+			.isEqualTo(clientRegistrationResponse.getTokenEndpointAuthenticationMethod());
 		assertThat(clientConfigurationResponse.getIdTokenSignedResponseAlgorithm())
-				.isEqualTo(clientRegistrationResponse.getIdTokenSignedResponseAlgorithm());
+			.isEqualTo(clientRegistrationResponse.getIdTokenSignedResponseAlgorithm());
 		assertThat(clientConfigurationResponse.getRegistrationClientUrl())
-				.isEqualTo(clientRegistrationResponse.getRegistrationClientUrl());
+			.isEqualTo(clientRegistrationResponse.getRegistrationClientUrl());
 		assertThat(clientConfigurationResponse.getRegistrationAccessToken()).isNull();
 	}
 
@@ -343,36 +357,38 @@ public class OidcClientRegistrationTests {
 		registerClient(clientRegistration);
 
 		verify(authenticationConverter).convert(any());
-		ArgumentCaptor<List<AuthenticationConverter>> authenticationConvertersCaptor =
-				ArgumentCaptor.forClass(List.class);
+		ArgumentCaptor<List<AuthenticationConverter>> authenticationConvertersCaptor = ArgumentCaptor
+			.forClass(List.class);
 		verify(authenticationConvertersConsumer).accept(authenticationConvertersCaptor.capture());
 		List<AuthenticationConverter> authenticationConverters = authenticationConvertersCaptor.getValue();
 		assertThat(authenticationConverters).hasSize(2)
-				.allMatch(converter -> converter == authenticationConverter
-						|| converter instanceof OidcClientRegistrationAuthenticationConverter);
+			.allMatch(converter -> converter == authenticationConverter
+					|| converter instanceof OidcClientRegistrationAuthenticationConverter);
 
 		verify(authenticationProvider).authenticate(any());
-		ArgumentCaptor<List<AuthenticationProvider>> authenticationProvidersCaptor =
-				ArgumentCaptor.forClass(List.class);
+		ArgumentCaptor<List<AuthenticationProvider>> authenticationProvidersCaptor = ArgumentCaptor
+			.forClass(List.class);
 		verify(authenticationProvidersConsumer).accept(authenticationProvidersCaptor.capture());
 		List<AuthenticationProvider> authenticationProviders = authenticationProvidersCaptor.getValue();
 		assertThat(authenticationProviders).hasSize(3)
-				.allMatch(provider -> provider == authenticationProvider
-						|| provider instanceof OidcClientRegistrationAuthenticationProvider
-						|| provider instanceof OidcClientConfigurationAuthenticationProvider);
+			.allMatch(provider -> provider == authenticationProvider
+					|| provider instanceof OidcClientRegistrationAuthenticationProvider
+					|| provider instanceof OidcClientConfigurationAuthenticationProvider);
 
 		verify(authenticationSuccessHandler).onAuthenticationSuccess(any(), any(), any());
 		verifyNoInteractions(authenticationFailureHandler);
 	}
 
 	@Test
-	public void requestWhenClientRegistrationEndpointCustomizedWithAuthenticationFailureHandlerThenUsed() throws Exception {
+	public void requestWhenClientRegistrationEndpointCustomizedWithAuthenticationFailureHandlerThenUsed()
+			throws Exception {
 		this.spring.register(CustomClientRegistrationConfiguration.class).autowire();
 
 		when(authenticationProvider.authenticate(any())).thenThrow(new OAuth2AuthenticationException("error"));
 
-		this.mvc.perform(get(DEFAULT_OIDC_CLIENT_REGISTRATION_ENDPOINT_URI)
-				.param(OAuth2ParameterNames.CLIENT_ID, "invalid").with(jwt()));
+		this.mvc.perform(get(ISSUER.concat(DEFAULT_OIDC_CLIENT_REGISTRATION_ENDPOINT_URI))
+			.param(OAuth2ParameterNames.CLIENT_ID, "invalid")
+			.with(jwt()));
 
 		verify(authenticationFailureHandler).onAuthenticationFailure(any(), any(), any());
 		verifyNoInteractions(authenticationSuccessHandler);
@@ -396,14 +412,68 @@ public class OidcClientRegistrationTests {
 
 		OidcClientRegistration clientRegistrationResponse = registerClient(clientRegistration);
 
-		this.mvc.perform(post(DEFAULT_TOKEN_ENDPOINT_URI)
-						.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
-						.param(OAuth2ParameterNames.SCOPE, "scope1")
-						.with(httpBasic(clientRegistrationResponse.getClientId(), clientRegistrationResponse.getClientSecret())))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.access_token").isNotEmpty())
-				.andExpect(jsonPath("$.scope").value("scope1"))
-				.andReturn();
+		this.mvc
+			.perform(post(ISSUER.concat(DEFAULT_TOKEN_ENDPOINT_URI))
+				.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
+				.param(OAuth2ParameterNames.SCOPE, "scope1")
+				.with(httpBasic(clientRegistrationResponse.getClientId(),
+						clientRegistrationResponse.getClientSecret())))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.access_token").isNotEmpty())
+			.andExpect(jsonPath("$.scope").value("scope1"))
+			.andReturn();
+	}
+
+	// gh-1344
+	@Test
+	public void requestWhenClientRegistersWithClientSecretJwtThenClientAuthenticationSuccess() throws Exception {
+		this.spring.register(AuthorizationServerConfiguration.class).autowire();
+
+		// @formatter:off
+		OidcClientRegistration clientRegistration = OidcClientRegistration.builder()
+				.clientName("client-name")
+				.redirectUri("https://client.example.com")
+				.grantType(AuthorizationGrantType.AUTHORIZATION_CODE.getValue())
+				.grantType(AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
+				.tokenEndpointAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_JWT.getValue())
+				.scope("scope1")
+				.scope("scope2")
+				.build();
+		// @formatter:on
+
+		OidcClientRegistration clientRegistrationResponse = registerClient(clientRegistration);
+
+		JwsHeader jwsHeader = JwsHeader.with(MacAlgorithm.HS256).build();
+
+		Instant issuedAt = Instant.now();
+		Instant expiresAt = issuedAt.plus(1, ChronoUnit.HOURS);
+		JwtClaimsSet jwtClaimsSet = JwtClaimsSet.builder()
+			.issuer(clientRegistrationResponse.getClientId())
+			.subject(clientRegistrationResponse.getClientId())
+			.audience(Collections.singletonList(asUrl(ISSUER, this.authorizationServerSettings.getTokenEndpoint())))
+			.issuedAt(issuedAt)
+			.expiresAt(expiresAt)
+			.build();
+
+		JWKSet jwkSet = new JWKSet(
+				TestJwks.jwk(new SecretKeySpec(clientRegistrationResponse.getClientSecret().getBytes(), "HS256"))
+					.build());
+		JwtEncoder jwtClientAssertionEncoder = new NimbusJwtEncoder(
+				(jwkSelector, securityContext) -> jwkSelector.select(jwkSet));
+
+		Jwt jwtAssertion = jwtClientAssertionEncoder.encode(JwtEncoderParameters.from(jwsHeader, jwtClaimsSet));
+
+		this.mvc
+			.perform(post(ISSUER.concat(DEFAULT_TOKEN_ENDPOINT_URI))
+				.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
+				.param(OAuth2ParameterNames.SCOPE, "scope1")
+				.param(OAuth2ParameterNames.CLIENT_ASSERTION_TYPE,
+						"urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
+				.param(OAuth2ParameterNames.CLIENT_ASSERTION, jwtAssertion.getTokenValue())
+				.param(OAuth2ParameterNames.CLIENT_ID, clientRegistrationResponse.getClientId()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.access_token").isNotEmpty())
+			.andExpect(jsonPath("$.scope").value("scope1"));
 	}
 
 	@Test
@@ -420,18 +490,24 @@ public class OidcClientRegistrationTests {
 				.scope("scope2")
 				.claim("custom-metadata-name-1", "value-1")
 				.claim("custom-metadata-name-2", "value-2")
+				.claim("non-registered-custom-metadata", "value-3")
 				.build();
 		// @formatter:on
 
 		OidcClientRegistration clientRegistrationResponse = registerClient(clientRegistration);
 
-		RegisteredClient registeredClient = this.registeredClientRepository.findByClientId(
-				clientRegistrationResponse.getClientId());
+		RegisteredClient registeredClient = this.registeredClientRepository
+			.findByClientId(clientRegistrationResponse.getClientId());
+
+		assertThat(clientRegistrationResponse.<String>getClaim("custom-metadata-name-1")).isEqualTo("value-1");
+		assertThat(clientRegistrationResponse.<String>getClaim("custom-metadata-name-2")).isEqualTo("value-2");
+		assertThat(clientRegistrationResponse.<String>getClaim("non-registered-custom-metadata")).isNull();
 
 		assertThat(registeredClient.getClientSettings().<String>getSetting("custom-metadata-name-1"))
-				.isEqualTo("value-1");
+			.isEqualTo("value-1");
 		assertThat(registeredClient.getClientSettings().<String>getSetting("custom-metadata-name-2"))
-				.isEqualTo("value-2");
+			.isEqualTo("value-2");
+		assertThat(registeredClient.getClientSettings().<String>getSetting("non-registered-custom-metadata")).isNull();
 	}
 
 	private OidcClientRegistration registerClient(OidcClientRegistration clientRegistration) throws Exception {
@@ -462,16 +538,18 @@ public class OidcClientRegistrationTests {
 		// @formatter:on
 		Jwt jwtAssertion = jwtClientAssertionEncoder.encode(JwtEncoderParameters.from(jwsHeader, jwtClaimsSet));
 
-		MvcResult mvcResult = this.mvc.perform(post(DEFAULT_TOKEN_ENDPOINT_URI)
+		MvcResult mvcResult = this.mvc
+			.perform(post(ISSUER.concat(DEFAULT_TOKEN_ENDPOINT_URI))
 				.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
 				.param(OAuth2ParameterNames.SCOPE, clientRegistrationScope)
-				.param(OAuth2ParameterNames.CLIENT_ASSERTION_TYPE, "urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
+				.param(OAuth2ParameterNames.CLIENT_ASSERTION_TYPE,
+						"urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
 				.param(OAuth2ParameterNames.CLIENT_ASSERTION, jwtAssertion.getTokenValue())
 				.param(OAuth2ParameterNames.CLIENT_ID, clientRegistrar.getClientId()))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.access_token").isNotEmpty())
-				.andExpect(jsonPath("$.scope").value(clientRegistrationScope))
-				.andReturn();
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.access_token").isNotEmpty())
+			.andExpect(jsonPath("$.scope").value(clientRegistrationScope))
+			.andReturn();
 
 		OAuth2AccessToken accessToken = readAccessTokenResponse(mvcResult.getResponse()).getAccessToken();
 
@@ -481,14 +559,14 @@ public class OidcClientRegistrationTests {
 		httpHeaders.setBearerAuth(accessToken.getTokenValue());
 
 		// Register the client
-		mvcResult = this.mvc.perform(post(DEFAULT_OIDC_CLIENT_REGISTRATION_ENDPOINT_URI)
-				.headers(httpHeaders)
+		mvcResult = this.mvc
+			.perform(post(ISSUER.concat(DEFAULT_OIDC_CLIENT_REGISTRATION_ENDPOINT_URI)).headers(httpHeaders)
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(getClientRegistrationRequestContent(clientRegistration)))
-				.andExpect(status().isCreated())
-				.andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("no-store")))
-				.andExpect(header().string(HttpHeaders.PRAGMA, containsString("no-cache")))
-				.andReturn();
+			.andExpect(status().isCreated())
+			.andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("no-store")))
+			.andExpect(header().string(HttpHeaders.PRAGMA, containsString("no-cache")))
+			.andReturn();
 
 		return readClientRegistrationResponse(mvcResult.getResponse());
 	}
@@ -497,32 +575,35 @@ public class OidcClientRegistrationTests {
 		Instant issuedAt = Instant.now();
 		Instant expiresAt = issuedAt.plus(1, ChronoUnit.HOURS);
 		return JwtClaimsSet.builder()
-				.issuer(registeredClient.getClientId())
-				.subject(registeredClient.getClientId())
-				.audience(Collections.singletonList(asUrl(this.authorizationServerSettings.getIssuer(), this.authorizationServerSettings.getTokenEndpoint())))
-				.issuedAt(issuedAt)
-				.expiresAt(expiresAt);
+			.issuer(registeredClient.getClientId())
+			.subject(registeredClient.getClientId())
+			.audience(Collections.singletonList(asUrl(ISSUER, this.authorizationServerSettings.getTokenEndpoint())))
+			.issuedAt(issuedAt)
+			.expiresAt(expiresAt);
 	}
 
 	private static String asUrl(String uri, String path) {
 		return UriComponentsBuilder.fromUriString(uri).path(path).build().toUriString();
 	}
 
-	private static OAuth2AccessTokenResponse readAccessTokenResponse(MockHttpServletResponse response) throws Exception {
-		MockClientHttpResponse httpResponse = new MockClientHttpResponse(
-				response.getContentAsByteArray(), HttpStatus.valueOf(response.getStatus()));
+	private static OAuth2AccessTokenResponse readAccessTokenResponse(MockHttpServletResponse response)
+			throws Exception {
+		MockClientHttpResponse httpResponse = new MockClientHttpResponse(response.getContentAsByteArray(),
+				HttpStatus.valueOf(response.getStatus()));
 		return accessTokenHttpResponseConverter.read(OAuth2AccessTokenResponse.class, httpResponse);
 	}
 
-	private static byte[] getClientRegistrationRequestContent(OidcClientRegistration clientRegistration) throws Exception {
+	private static byte[] getClientRegistrationRequestContent(OidcClientRegistration clientRegistration)
+			throws Exception {
 		MockHttpOutputMessage httpRequest = new MockHttpOutputMessage();
 		clientRegistrationHttpMessageConverter.write(clientRegistration, null, httpRequest);
 		return httpRequest.getBodyAsBytes();
 	}
 
-	private static OidcClientRegistration readClientRegistrationResponse(MockHttpServletResponse response) throws Exception {
-		MockClientHttpResponse httpResponse = new MockClientHttpResponse(
-				response.getContentAsByteArray(), HttpStatus.valueOf(response.getStatus()));
+	private static OidcClientRegistration readClientRegistrationResponse(MockHttpServletResponse response)
+			throws Exception {
+		MockClientHttpResponse httpResponse = new MockClientHttpResponse(response.getContentAsByteArray(),
+				HttpStatus.valueOf(response.getStatus()));
 		return clientRegistrationHttpMessageConverter.read(OidcClientRegistration.class, httpResponse);
 	}
 
@@ -564,6 +645,7 @@ public class OidcClientRegistrationTests {
 			return http.build();
 		}
 		// @formatter:on
+
 	}
 
 	@EnableWebSecurity
@@ -581,7 +663,7 @@ public class OidcClientRegistrationTests {
 					oidc
 						.clientRegistrationEndpoint(clientRegistration ->
 							clientRegistration
-								.authenticationProviders(configureRegisteredClientConverter())
+								.authenticationProviders(configureClientRegistrationConverters())
 						)
 				);
 			RequestMatcher endpointsMatcher = authorizationServerConfigurer.getEndpointsMatcher();
@@ -600,111 +682,17 @@ public class OidcClientRegistrationTests {
 		}
 		// @formatter:on
 
-		private Consumer<List<AuthenticationProvider>> configureRegisteredClientConverter() {
-			return (authenticationProviders) -> {
-				authenticationProviders.forEach((authenticationProvider) -> {
-					if (authenticationProvider instanceof OidcClientRegistrationAuthenticationProvider) {
-						((OidcClientRegistrationAuthenticationProvider) authenticationProvider)
-								.setRegisteredClientConverter(new OidcClientRegistrationRegisteredClientConverter());
-					}
-				});
-			};
-		}
-
-		// NOTE:
-		// This is a copy of OidcClientRegistrationAuthenticationProvider.OidcClientRegistrationRegisteredClientConverter
-		// with a minor enhancement supporting custom metadata claims.
-		private static final class OidcClientRegistrationRegisteredClientConverter implements Converter<OidcClientRegistration, RegisteredClient> {
-			private static final StringKeyGenerator CLIENT_ID_GENERATOR = new Base64StringKeyGenerator(
-					Base64.getUrlEncoder().withoutPadding(), 32);
-			private static final StringKeyGenerator CLIENT_SECRET_GENERATOR = new Base64StringKeyGenerator(
-					Base64.getUrlEncoder().withoutPadding(), 48);
-
-			@Override
-			public RegisteredClient convert(OidcClientRegistration clientRegistration) {
-				// @formatter:off
-				RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
-						.clientId(CLIENT_ID_GENERATOR.generateKey())
-						.clientIdIssuedAt(Instant.now())
-						.clientName(clientRegistration.getClientName());
-
-				if (ClientAuthenticationMethod.CLIENT_SECRET_POST.getValue().equals(clientRegistration.getTokenEndpointAuthenticationMethod())) {
-					builder
-							.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_POST)
-							.clientSecret(CLIENT_SECRET_GENERATOR.generateKey());
-				} else if (ClientAuthenticationMethod.CLIENT_SECRET_JWT.getValue().equals(clientRegistration.getTokenEndpointAuthenticationMethod())) {
-					builder
-							.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_JWT)
-							.clientSecret(CLIENT_SECRET_GENERATOR.generateKey());
-				} else if (ClientAuthenticationMethod.PRIVATE_KEY_JWT.getValue().equals(clientRegistration.getTokenEndpointAuthenticationMethod())) {
-					builder.clientAuthenticationMethod(ClientAuthenticationMethod.PRIVATE_KEY_JWT);
-				} else {
-					builder
-							.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
-							.clientSecret(CLIENT_SECRET_GENERATOR.generateKey());
-				}
-
-				builder.redirectUris(redirectUris ->
-						redirectUris.addAll(clientRegistration.getRedirectUris()));
-
-				if (!CollectionUtils.isEmpty(clientRegistration.getPostLogoutRedirectUris())) {
-					builder.postLogoutRedirectUris(postLogoutRedirectUris ->
-							postLogoutRedirectUris.addAll(clientRegistration.getPostLogoutRedirectUris()));
-				}
-
-				if (!CollectionUtils.isEmpty(clientRegistration.getGrantTypes())) {
-					builder.authorizationGrantTypes(authorizationGrantTypes ->
-							clientRegistration.getGrantTypes().forEach(grantType ->
-									authorizationGrantTypes.add(new AuthorizationGrantType(grantType))));
-				} else {
-					builder.authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE);
-				}
-				if (CollectionUtils.isEmpty(clientRegistration.getResponseTypes()) ||
-						clientRegistration.getResponseTypes().contains(OAuth2AuthorizationResponseType.CODE.getValue())) {
-					builder.authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE);
-				}
-
-				if (!CollectionUtils.isEmpty(clientRegistration.getScopes())) {
-					builder.scopes(scopes ->
-							scopes.addAll(clientRegistration.getScopes()));
-				}
-
-				ClientSettings.Builder clientSettingsBuilder = ClientSettings.builder()
-						.requireProofKey(true)
-						.requireAuthorizationConsent(true);
-
-				if (ClientAuthenticationMethod.CLIENT_SECRET_JWT.getValue().equals(clientRegistration.getTokenEndpointAuthenticationMethod())) {
-					MacAlgorithm macAlgorithm = MacAlgorithm.from(clientRegistration.getTokenEndpointAuthenticationSigningAlgorithm());
-					if (macAlgorithm == null) {
-						macAlgorithm = MacAlgorithm.HS256;
-					}
-					clientSettingsBuilder.tokenEndpointAuthenticationSigningAlgorithm(macAlgorithm);
-				} else if (ClientAuthenticationMethod.PRIVATE_KEY_JWT.getValue().equals(clientRegistration.getTokenEndpointAuthenticationMethod())) {
-					SignatureAlgorithm signatureAlgorithm = SignatureAlgorithm.from(clientRegistration.getTokenEndpointAuthenticationSigningAlgorithm());
-					if (signatureAlgorithm == null) {
-						signatureAlgorithm = SignatureAlgorithm.RS256;
-					}
-					clientSettingsBuilder.tokenEndpointAuthenticationSigningAlgorithm(signatureAlgorithm);
-					clientSettingsBuilder.jwkSetUrl(clientRegistration.getJwkSetUrl().toString());
-				}
-
-				// Add custom metadata claims
-				clientRegistration.getClaims().forEach((claim, value) -> {
-					if (claim.startsWith("custom-metadata")) {
-						clientSettingsBuilder.setting(claim, value);
-					}
-				});
-
-				builder
-						.clientSettings(clientSettingsBuilder.build())
-						.tokenSettings(TokenSettings.builder()
-								.idTokenSignatureAlgorithm(SignatureAlgorithm.RS256)
-								.build());
-
-				return builder.build();
-				// @formatter:on
-			}
-
+		private Consumer<List<AuthenticationProvider>> configureClientRegistrationConverters() {
+			// @formatter:off
+			return (authenticationProviders) ->
+					authenticationProviders.forEach(authenticationProvider -> {
+						List<String> supportedCustomClientMetadata = List.of("custom-metadata-name-1", "custom-metadata-name-2");
+						if (authenticationProvider instanceof OidcClientRegistrationAuthenticationProvider provider) {
+							provider.setRegisteredClientConverter(new CustomRegisteredClientConverter(supportedCustomClientMetadata));
+							provider.setClientRegistrationConverter(new CustomClientRegistrationConverter(supportedCustomClientMetadata));
+						}
+					});
+			// @formatter:on
 		}
 
 	}
@@ -741,14 +729,16 @@ public class OidcClientRegistrationTests {
 		RegisteredClientRepository registeredClientRepository(JdbcOperations jdbcOperations) {
 			RegisteredClient registeredClient = TestRegisteredClients.registeredClient().build();
 			RegisteredClientParametersMapper registeredClientParametersMapper = new RegisteredClientParametersMapper();
-			JdbcRegisteredClientRepository registeredClientRepository = new JdbcRegisteredClientRepository(jdbcOperations);
+			JdbcRegisteredClientRepository registeredClientRepository = new JdbcRegisteredClientRepository(
+					jdbcOperations);
 			registeredClientRepository.setRegisteredClientParametersMapper(registeredClientParametersMapper);
 			registeredClientRepository.save(registeredClient);
 			return registeredClientRepository;
 		}
 
 		@Bean
-		OAuth2AuthorizationService authorizationService(JdbcOperations jdbcOperations, RegisteredClientRepository registeredClientRepository) {
+		OAuth2AuthorizationService authorizationService(JdbcOperations jdbcOperations,
+				RegisteredClientRepository registeredClientRepository) {
 			return new JdbcOAuth2AuthorizationService(jdbcOperations, registeredClientRepository);
 		}
 
@@ -769,14 +759,72 @@ public class OidcClientRegistrationTests {
 
 		@Bean
 		AuthorizationServerSettings authorizationServerSettings() {
-			return AuthorizationServerSettings.builder()
-					.issuer("https://auth-server:9000")
-					.build();
+			return AuthorizationServerSettings.builder().multipleIssuersAllowed(true).build();
 		}
 
 		@Bean
 		PasswordEncoder passwordEncoder() {
 			return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+		}
+
+	}
+
+	private static class CustomRegisteredClientConverter
+			implements Converter<OidcClientRegistration, RegisteredClient> {
+
+		private final OidcClientRegistrationRegisteredClientConverter delegate = new OidcClientRegistrationRegisteredClientConverter();
+
+		private final List<String> supportedCustomClientMetadata;
+
+		private CustomRegisteredClientConverter(List<String> supportedCustomClientMetadata) {
+			this.supportedCustomClientMetadata = supportedCustomClientMetadata;
+		}
+
+		@Override
+		public RegisteredClient convert(OidcClientRegistration clientRegistration) {
+			RegisteredClient registeredClient = this.delegate.convert(clientRegistration);
+
+			ClientSettings.Builder clientSettingsBuilder = ClientSettings
+				.withSettings(registeredClient.getClientSettings().getSettings());
+			if (!CollectionUtils.isEmpty(this.supportedCustomClientMetadata)) {
+				clientRegistration.getClaims().forEach((claim, value) -> {
+					if (this.supportedCustomClientMetadata.contains(claim)) {
+						clientSettingsBuilder.setting(claim, value);
+					}
+				});
+			}
+
+			return RegisteredClient.from(registeredClient).clientSettings(clientSettingsBuilder.build()).build();
+		}
+
+	}
+
+	private static class CustomClientRegistrationConverter
+			implements Converter<RegisteredClient, OidcClientRegistration> {
+
+		private final RegisteredClientOidcClientRegistrationConverter delegate = new RegisteredClientOidcClientRegistrationConverter();
+
+		private final List<String> supportedCustomClientMetadata;
+
+		private CustomClientRegistrationConverter(List<String> supportedCustomClientMetadata) {
+			this.supportedCustomClientMetadata = supportedCustomClientMetadata;
+		}
+
+		@Override
+		public OidcClientRegistration convert(RegisteredClient registeredClient) {
+			OidcClientRegistration clientRegistration = this.delegate.convert(registeredClient);
+
+			Map<String, Object> clientMetadata = new HashMap<>(clientRegistration.getClaims());
+			if (!CollectionUtils.isEmpty(this.supportedCustomClientMetadata)) {
+				Map<String, Object> clientSettings = registeredClient.getClientSettings().getSettings();
+				this.supportedCustomClientMetadata.forEach((customClaim) -> {
+					if (clientSettings.containsKey(customClaim)) {
+						clientMetadata.put(customClaim, clientSettings.get(customClaim));
+					}
+				});
+			}
+
+			return OidcClientRegistration.withClaims(clientMetadata).build();
 		}
 
 	}

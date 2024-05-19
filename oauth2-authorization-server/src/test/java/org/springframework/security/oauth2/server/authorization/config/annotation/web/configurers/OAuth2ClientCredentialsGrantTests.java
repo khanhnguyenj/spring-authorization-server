@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2023 the original author or authors.
+ * Copyright 2020-2024 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,7 +74,9 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientCredentialsAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceCodeAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2RefreshTokenAuthenticationProvider;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2TokenExchangeAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.authentication.PublicClientAuthenticationProvider;
+import org.springframework.security.oauth2.server.authorization.authentication.X509ClientCertificateAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository.RegisteredClientParametersMapper;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
@@ -82,10 +84,13 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.oauth2.server.authorization.client.TestRegisteredClients;
 import org.springframework.security.oauth2.server.authorization.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
 import org.springframework.security.oauth2.server.authorization.jackson2.TestingAuthenticationTokenMixin;
+import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
 import org.springframework.security.oauth2.server.authorization.test.SpringTestContext;
 import org.springframework.security.oauth2.server.authorization.test.SpringTestContextExtension;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
+import org.springframework.security.oauth2.server.authorization.util.TestX509Certificates;
 import org.springframework.security.oauth2.server.authorization.web.authentication.ClientSecretBasicAuthenticationConverter;
 import org.springframework.security.oauth2.server.authorization.web.authentication.ClientSecretPostAuthenticationConverter;
 import org.springframework.security.oauth2.server.authorization.web.authentication.JwtClientAssertionAuthenticationConverter;
@@ -93,7 +98,9 @@ import org.springframework.security.oauth2.server.authorization.web.authenticati
 import org.springframework.security.oauth2.server.authorization.web.authentication.OAuth2ClientCredentialsAuthenticationConverter;
 import org.springframework.security.oauth2.server.authorization.web.authentication.OAuth2DeviceCodeAuthenticationConverter;
 import org.springframework.security.oauth2.server.authorization.web.authentication.OAuth2RefreshTokenAuthenticationConverter;
+import org.springframework.security.oauth2.server.authorization.web.authentication.OAuth2TokenExchangeAuthenticationConverter;
 import org.springframework.security.oauth2.server.authorization.web.authentication.PublicClientAuthenticationConverter;
+import org.springframework.security.oauth2.server.authorization.web.authentication.X509ClientCertificateAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationConverter;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
@@ -110,6 +117,7 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.x509;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -122,15 +130,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @ExtendWith(SpringTestContextExtension.class)
 public class OAuth2ClientCredentialsGrantTests {
+
 	private static final String DEFAULT_TOKEN_ENDPOINT_URI = "/oauth2/token";
+
 	private static EmbeddedDatabase db;
+
 	private static JWKSource<SecurityContext> jwkSource;
+
 	private static OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer;
+
 	private static AuthenticationConverter authenticationConverter;
+
 	private static Consumer<List<AuthenticationConverter>> authenticationConvertersConsumer;
+
 	private static AuthenticationProvider authenticationProvider;
+
 	private static Consumer<List<AuthenticationProvider>> authenticationProvidersConsumer;
+
 	private static AuthenticationSuccessHandler authenticationSuccessHandler;
+
 	private static AuthenticationFailureHandler authenticationFailureHandler;
 
 	public final SpringTestContext spring = new SpringTestContext();
@@ -155,13 +173,13 @@ public class OAuth2ClientCredentialsGrantTests {
 		authenticationProvidersConsumer = mock(Consumer.class);
 		authenticationSuccessHandler = mock(AuthenticationSuccessHandler.class);
 		authenticationFailureHandler = mock(AuthenticationFailureHandler.class);
-		db = new EmbeddedDatabaseBuilder()
-				.generateUniqueName(true)
-				.setType(EmbeddedDatabaseType.HSQL)
-				.setScriptEncoding("UTF-8")
-				.addScript("org/springframework/security/oauth2/server/authorization/oauth2-authorization-schema.sql")
-				.addScript("org/springframework/security/oauth2/server/authorization/client/oauth2-registered-client-schema.sql")
-				.build();
+		db = new EmbeddedDatabaseBuilder().generateUniqueName(true)
+			.setType(EmbeddedDatabaseType.HSQL)
+			.setScriptEncoding("UTF-8")
+			.addScript("org/springframework/security/oauth2/server/authorization/oauth2-authorization-schema.sql")
+			.addScript(
+					"org/springframework/security/oauth2/server/authorization/client/oauth2-registered-client-schema.sql")
+			.build();
 	}
 
 	@SuppressWarnings("unchecked")
@@ -191,9 +209,10 @@ public class OAuth2ClientCredentialsGrantTests {
 	public void requestWhenTokenRequestNotAuthenticatedThenUnauthorized() throws Exception {
 		this.spring.register(AuthorizationServerConfiguration.class).autowire();
 
-		this.mvc.perform(MockMvcRequestBuilders.post(DEFAULT_TOKEN_ENDPOINT_URI)
+		this.mvc
+			.perform(MockMvcRequestBuilders.post(DEFAULT_TOKEN_ENDPOINT_URI)
 				.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue()))
-				.andExpect(status().isUnauthorized());
+			.andExpect(status().isUnauthorized());
 	}
 
 	@Test
@@ -203,14 +222,15 @@ public class OAuth2ClientCredentialsGrantTests {
 		RegisteredClient registeredClient = TestRegisteredClients.registeredClient2().build();
 		this.registeredClientRepository.save(registeredClient);
 
-		this.mvc.perform(post(DEFAULT_TOKEN_ENDPOINT_URI)
+		this.mvc
+			.perform(post(DEFAULT_TOKEN_ENDPOINT_URI)
 				.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
 				.param(OAuth2ParameterNames.SCOPE, "scope1 scope2")
-				.header(HttpHeaders.AUTHORIZATION, "Basic " + encodeBasicAuth(
-						registeredClient.getClientId(), registeredClient.getClientSecret())))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.access_token").isNotEmpty())
-				.andExpect(jsonPath("$.scope").value("scope1 scope2"));
+				.header(HttpHeaders.AUTHORIZATION,
+						"Basic " + encodeBasicAuth(registeredClient.getClientId(), registeredClient.getClientSecret())))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.access_token").isNotEmpty())
+			.andExpect(jsonPath("$.scope").value("scope1 scope2"));
 
 		verify(jwtCustomizer).customize(any());
 	}
@@ -222,38 +242,72 @@ public class OAuth2ClientCredentialsGrantTests {
 		RegisteredClient registeredClient = TestRegisteredClients.registeredClient2().build();
 		this.registeredClientRepository.save(registeredClient);
 
-		this.mvc.perform(post(DEFAULT_TOKEN_ENDPOINT_URI)
+		this.mvc
+			.perform(post(DEFAULT_TOKEN_ENDPOINT_URI)
 				.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
 				.param(OAuth2ParameterNames.SCOPE, "scope1 scope2")
 				.param(OAuth2ParameterNames.CLIENT_ID, registeredClient.getClientId())
 				.param(OAuth2ParameterNames.CLIENT_SECRET, registeredClient.getClientSecret()))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.access_token").isNotEmpty())
-				.andExpect(jsonPath("$.scope").value("scope1 scope2"));
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.access_token").isNotEmpty())
+			.andExpect(jsonPath("$.scope").value("scope1 scope2"));
 
 		verify(jwtCustomizer).customize(any());
 	}
 
 	@Test
-	public void requestWhenTokenRequestPostsClientCredentialsAndRequiresUpgradingThenClientSecretUpgraded() throws Exception {
+	public void requestWhenTokenRequestPostsClientCredentialsAndRequiresUpgradingThenClientSecretUpgraded()
+			throws Exception {
 		this.spring.register(AuthorizationServerConfigurationCustomPasswordEncoder.class).autowire();
 
 		String clientSecret = "secret-2";
-		RegisteredClient registeredClient = TestRegisteredClients.registeredClient2().clientSecret("{noop}" + clientSecret).build();
+		RegisteredClient registeredClient = TestRegisteredClients.registeredClient2()
+			.clientSecret("{noop}" + clientSecret)
+			.build();
 		this.registeredClientRepository.save(registeredClient);
 
-		this.mvc.perform(post(DEFAULT_TOKEN_ENDPOINT_URI)
-						.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
-						.param(OAuth2ParameterNames.SCOPE, "scope1 scope2")
-						.param(OAuth2ParameterNames.CLIENT_ID, registeredClient.getClientId())
-						.param(OAuth2ParameterNames.CLIENT_SECRET, clientSecret))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.access_token").isNotEmpty())
-				.andExpect(jsonPath("$.scope").value("scope1 scope2"));
+		this.mvc
+			.perform(post(DEFAULT_TOKEN_ENDPOINT_URI)
+				.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
+				.param(OAuth2ParameterNames.SCOPE, "scope1 scope2")
+				.param(OAuth2ParameterNames.CLIENT_ID, registeredClient.getClientId())
+				.param(OAuth2ParameterNames.CLIENT_SECRET, clientSecret))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.access_token").isNotEmpty())
+			.andExpect(jsonPath("$.scope").value("scope1 scope2"));
 
 		verify(jwtCustomizer).customize(any());
-		RegisteredClient updatedRegisteredClient = this.registeredClientRepository.findByClientId(registeredClient.getClientId());
+		RegisteredClient updatedRegisteredClient = this.registeredClientRepository
+			.findByClientId(registeredClient.getClientId());
 		assertThat(updatedRegisteredClient.getClientSecret()).startsWith("{bcrypt}");
+	}
+
+	@Test
+	public void requestWhenTokenRequestWithPKIX509ClientCertificateThenTokenResponse() throws Exception {
+		this.spring.register(AuthorizationServerConfiguration.class).autowire();
+
+		// @formatter:off
+		RegisteredClient registeredClient = TestRegisteredClients.registeredClient2()
+				.clientAuthenticationMethod(ClientAuthenticationMethod.TLS_CLIENT_AUTH)
+				.clientSettings(
+						ClientSettings.builder()
+								.x509CertificateSubjectDN(TestX509Certificates.DEMO_CLIENT_PKI_CERTIFICATE[0].getSubjectX500Principal().getName())
+								.build()
+				)
+				.build();
+		// @formatter:on
+		this.registeredClientRepository.save(registeredClient);
+
+		this.mvc
+			.perform(post(DEFAULT_TOKEN_ENDPOINT_URI).with(x509(TestX509Certificates.DEMO_CLIENT_PKI_CERTIFICATE))
+				.param(OAuth2ParameterNames.CLIENT_ID, registeredClient.getClientId())
+				.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
+				.param(OAuth2ParameterNames.SCOPE, "scope1 scope2"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.access_token").isNotEmpty())
+			.andExpect(jsonPath("$.scope").value("scope1 scope2"));
+
+		verify(jwtCustomizer).customize(any());
 	}
 
 	@Test
@@ -263,51 +317,53 @@ public class OAuth2ClientCredentialsGrantTests {
 		RegisteredClient registeredClient = TestRegisteredClients.registeredClient2().build();
 		this.registeredClientRepository.save(registeredClient);
 
-		OAuth2ClientAuthenticationToken clientPrincipal = new OAuth2ClientAuthenticationToken(
-				registeredClient, ClientAuthenticationMethod.CLIENT_SECRET_BASIC, registeredClient.getClientSecret());
-		OAuth2ClientCredentialsAuthenticationToken clientCredentialsAuthentication =
-				new OAuth2ClientCredentialsAuthenticationToken(clientPrincipal, null, null);
+		OAuth2ClientAuthenticationToken clientPrincipal = new OAuth2ClientAuthenticationToken(registeredClient,
+				ClientAuthenticationMethod.CLIENT_SECRET_BASIC, registeredClient.getClientSecret());
+		OAuth2ClientCredentialsAuthenticationToken clientCredentialsAuthentication = new OAuth2ClientCredentialsAuthenticationToken(
+				clientPrincipal, null, null);
 		when(authenticationConverter.convert(any())).thenReturn(clientCredentialsAuthentication);
 
-		OAuth2AccessToken accessToken = new OAuth2AccessToken(
-				OAuth2AccessToken.TokenType.BEARER, "token",
+		OAuth2AccessToken accessToken = new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER, "token",
 				Instant.now(), Instant.now().plus(Duration.ofHours(1)));
-		OAuth2AccessTokenAuthenticationToken accessTokenAuthentication =
-				new OAuth2AccessTokenAuthenticationToken(registeredClient, clientPrincipal, accessToken);
+		OAuth2AccessTokenAuthenticationToken accessTokenAuthentication = new OAuth2AccessTokenAuthenticationToken(
+				registeredClient, clientPrincipal, accessToken);
 		when(authenticationProvider.supports(eq(OAuth2ClientCredentialsAuthenticationToken.class))).thenReturn(true);
 		when(authenticationProvider.authenticate(any())).thenReturn(accessTokenAuthentication);
 
-		this.mvc.perform(post(DEFAULT_TOKEN_ENDPOINT_URI)
+		this.mvc
+			.perform(post(DEFAULT_TOKEN_ENDPOINT_URI)
 				.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
-				.header(HttpHeaders.AUTHORIZATION, "Basic " + encodeBasicAuth(
-						registeredClient.getClientId(), registeredClient.getClientSecret())))
-				.andExpect(status().isOk());
+				.header(HttpHeaders.AUTHORIZATION,
+						"Basic " + encodeBasicAuth(registeredClient.getClientId(), registeredClient.getClientSecret())))
+			.andExpect(status().isOk());
 
 		verify(authenticationConverter).convert(any());
 
 		@SuppressWarnings("unchecked")
-		ArgumentCaptor<List<AuthenticationConverter>> authenticationConvertersCaptor = ArgumentCaptor.forClass(List.class);
+		ArgumentCaptor<List<AuthenticationConverter>> authenticationConvertersCaptor = ArgumentCaptor
+			.forClass(List.class);
 		verify(authenticationConvertersConsumer).accept(authenticationConvertersCaptor.capture());
 		List<AuthenticationConverter> authenticationConverters = authenticationConvertersCaptor.getValue();
-		assertThat(authenticationConverters).allMatch((converter) ->
-				converter == authenticationConverter ||
-						converter instanceof OAuth2AuthorizationCodeAuthenticationConverter ||
-						converter instanceof OAuth2RefreshTokenAuthenticationConverter ||
-						converter instanceof OAuth2ClientCredentialsAuthenticationConverter ||
-						converter instanceof OAuth2DeviceCodeAuthenticationConverter);
+		assertThat(authenticationConverters).allMatch((converter) -> converter == authenticationConverter
+				|| converter instanceof OAuth2AuthorizationCodeAuthenticationConverter
+				|| converter instanceof OAuth2RefreshTokenAuthenticationConverter
+				|| converter instanceof OAuth2ClientCredentialsAuthenticationConverter
+				|| converter instanceof OAuth2DeviceCodeAuthenticationConverter
+				|| converter instanceof OAuth2TokenExchangeAuthenticationConverter);
 
 		verify(authenticationProvider).authenticate(eq(clientCredentialsAuthentication));
 
 		@SuppressWarnings("unchecked")
-		ArgumentCaptor<List<AuthenticationProvider>> authenticationProvidersCaptor = ArgumentCaptor.forClass(List.class);
+		ArgumentCaptor<List<AuthenticationProvider>> authenticationProvidersCaptor = ArgumentCaptor
+			.forClass(List.class);
 		verify(authenticationProvidersConsumer).accept(authenticationProvidersCaptor.capture());
 		List<AuthenticationProvider> authenticationProviders = authenticationProvidersCaptor.getValue();
-		assertThat(authenticationProviders).allMatch((provider) ->
-				provider == authenticationProvider ||
-						provider instanceof OAuth2AuthorizationCodeAuthenticationProvider ||
-						provider instanceof OAuth2RefreshTokenAuthenticationProvider ||
-						provider instanceof OAuth2ClientCredentialsAuthenticationProvider ||
-						provider instanceof OAuth2DeviceCodeAuthenticationProvider);
+		assertThat(authenticationProviders).allMatch((provider) -> provider == authenticationProvider
+				|| provider instanceof OAuth2AuthorizationCodeAuthenticationProvider
+				|| provider instanceof OAuth2RefreshTokenAuthenticationProvider
+				|| provider instanceof OAuth2ClientCredentialsAuthenticationProvider
+				|| provider instanceof OAuth2DeviceCodeAuthenticationProvider
+				|| provider instanceof OAuth2TokenExchangeAuthenticationProvider);
 
 		verify(authenticationSuccessHandler).onAuthenticationSuccess(any(), any(), eq(accessTokenAuthentication));
 	}
@@ -319,42 +375,70 @@ public class OAuth2ClientCredentialsGrantTests {
 		RegisteredClient registeredClient = TestRegisteredClients.registeredClient2().build();
 		this.registeredClientRepository.save(registeredClient);
 
-		OAuth2ClientAuthenticationToken clientPrincipal = new OAuth2ClientAuthenticationToken(
-				registeredClient, new ClientAuthenticationMethod("custom"), null);
+		OAuth2ClientAuthenticationToken clientPrincipal = new OAuth2ClientAuthenticationToken(registeredClient,
+				new ClientAuthenticationMethod("custom"), null);
 		when(authenticationConverter.convert(any())).thenReturn(clientPrincipal);
 		when(authenticationProvider.supports(eq(OAuth2ClientAuthenticationToken.class))).thenReturn(true);
 		when(authenticationProvider.authenticate(any())).thenReturn(clientPrincipal);
 
-		this.mvc.perform(post(DEFAULT_TOKEN_ENDPOINT_URI)
-				.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue()))
-				.andExpect(status().isOk());
+		this.mvc
+			.perform(post(DEFAULT_TOKEN_ENDPOINT_URI).param(OAuth2ParameterNames.GRANT_TYPE,
+					AuthorizationGrantType.CLIENT_CREDENTIALS.getValue()))
+			.andExpect(status().isOk());
 
 		verify(authenticationConverter).convert(any());
 
 		@SuppressWarnings("unchecked")
-		ArgumentCaptor<List<AuthenticationConverter>> authenticationConvertersCaptor = ArgumentCaptor.forClass(List.class);
+		ArgumentCaptor<List<AuthenticationConverter>> authenticationConvertersCaptor = ArgumentCaptor
+			.forClass(List.class);
 		verify(authenticationConvertersConsumer).accept(authenticationConvertersCaptor.capture());
 		List<AuthenticationConverter> authenticationConverters = authenticationConvertersCaptor.getValue();
-		assertThat(authenticationConverters).allMatch((converter) ->
-				converter == authenticationConverter ||
-						converter instanceof JwtClientAssertionAuthenticationConverter ||
-						converter instanceof ClientSecretBasicAuthenticationConverter ||
-						converter instanceof ClientSecretPostAuthenticationConverter ||
-						converter instanceof PublicClientAuthenticationConverter);
+		assertThat(authenticationConverters).allMatch((converter) -> converter == authenticationConverter
+				|| converter instanceof JwtClientAssertionAuthenticationConverter
+				|| converter instanceof X509ClientCertificateAuthenticationConverter
+				|| converter instanceof ClientSecretBasicAuthenticationConverter
+				|| converter instanceof ClientSecretPostAuthenticationConverter
+				|| converter instanceof PublicClientAuthenticationConverter);
 
 		verify(authenticationProvider).authenticate(eq(clientPrincipal));
 
 		@SuppressWarnings("unchecked")
-		ArgumentCaptor<List<AuthenticationProvider>> authenticationProvidersCaptor = ArgumentCaptor.forClass(List.class);
+		ArgumentCaptor<List<AuthenticationProvider>> authenticationProvidersCaptor = ArgumentCaptor
+			.forClass(List.class);
 		verify(authenticationProvidersConsumer).accept(authenticationProvidersCaptor.capture());
 		List<AuthenticationProvider> authenticationProviders = authenticationProvidersCaptor.getValue();
-		assertThat(authenticationProviders).allMatch((provider) ->
-				provider == authenticationProvider ||
-						provider instanceof JwtClientAssertionAuthenticationProvider ||
-						provider instanceof ClientSecretAuthenticationProvider ||
-						provider instanceof PublicClientAuthenticationProvider);
+		assertThat(authenticationProviders).allMatch((provider) -> provider == authenticationProvider
+				|| provider instanceof JwtClientAssertionAuthenticationProvider
+				|| provider instanceof X509ClientCertificateAuthenticationProvider
+				|| provider instanceof ClientSecretAuthenticationProvider
+				|| provider instanceof PublicClientAuthenticationProvider);
 
 		verify(authenticationSuccessHandler).onAuthenticationSuccess(any(), any(), eq(clientPrincipal));
+	}
+
+	@Test
+	public void requestWhenTokenRequestIncludesIssuerPathThenIssuerResolvedWithPath() throws Exception {
+		this.spring.register(AuthorizationServerConfigurationWithMultipleIssuersAllowed.class).autowire();
+
+		RegisteredClient registeredClient = TestRegisteredClients.registeredClient2().build();
+		this.registeredClientRepository.save(registeredClient);
+
+		String issuer = "https://example.com:8443/issuer1";
+
+		this.mvc
+			.perform(post(issuer.concat(DEFAULT_TOKEN_ENDPOINT_URI))
+				.param(OAuth2ParameterNames.GRANT_TYPE, AuthorizationGrantType.CLIENT_CREDENTIALS.getValue())
+				.param(OAuth2ParameterNames.SCOPE, "scope1 scope2")
+				.header(HttpHeaders.AUTHORIZATION,
+						"Basic " + encodeBasicAuth(registeredClient.getClientId(), registeredClient.getClientSecret())))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.access_token").isNotEmpty())
+			.andExpect(jsonPath("$.scope").value("scope1 scope2"));
+
+		ArgumentCaptor<JwtEncodingContext> jwtEncodingContextCaptor = ArgumentCaptor.forClass(JwtEncodingContext.class);
+		verify(jwtCustomizer).customize(jwtEncodingContextCaptor.capture());
+		JwtEncodingContext jwtEncodingContext = jwtEncodingContextCaptor.getValue();
+		assertThat(jwtEncodingContext.getAuthorizationServerContext().getIssuer()).isEqualTo(issuer);
 	}
 
 	private static String encodeBasicAuth(String clientId, String secret) throws Exception {
@@ -370,8 +454,10 @@ public class OAuth2ClientCredentialsGrantTests {
 	static class AuthorizationServerConfiguration {
 
 		@Bean
-		OAuth2AuthorizationService authorizationService(JdbcOperations jdbcOperations, RegisteredClientRepository registeredClientRepository) {
-			JdbcOAuth2AuthorizationService authorizationService = new JdbcOAuth2AuthorizationService(jdbcOperations, registeredClientRepository);
+		OAuth2AuthorizationService authorizationService(JdbcOperations jdbcOperations,
+				RegisteredClientRepository registeredClientRepository) {
+			JdbcOAuth2AuthorizationService authorizationService = new JdbcOAuth2AuthorizationService(jdbcOperations,
+					registeredClientRepository);
 			authorizationService.setAuthorizationRowMapper(new RowMapper(registeredClientRepository));
 			authorizationService.setAuthorizationParametersMapper(new ParametersMapper());
 			return authorizationService;
@@ -379,7 +465,8 @@ public class OAuth2ClientCredentialsGrantTests {
 
 		@Bean
 		RegisteredClientRepository registeredClientRepository(JdbcOperations jdbcOperations) {
-			JdbcRegisteredClientRepository jdbcRegisteredClientRepository = new JdbcRegisteredClientRepository(jdbcOperations);
+			JdbcRegisteredClientRepository jdbcRegisteredClientRepository = new JdbcRegisteredClientRepository(
+					jdbcOperations);
 			RegisteredClientParametersMapper registeredClientParametersMapper = new RegisteredClientParametersMapper();
 			jdbcRegisteredClientRepository.setRegisteredClientParametersMapper(registeredClientParametersMapper);
 			return jdbcRegisteredClientRepository;
@@ -428,6 +515,7 @@ public class OAuth2ClientCredentialsGrantTests {
 	@EnableWebSecurity
 	@Configuration(proxyBeanMethods = false)
 	static class AuthorizationServerConfigurationCustomTokenEndpoint extends AuthorizationServerConfiguration {
+
 		// @formatter:off
 		@Bean
 		public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
@@ -454,20 +542,24 @@ public class OAuth2ClientCredentialsGrantTests {
 			return http.build();
 		}
 		// @formatter:on
+
 	}
 
 	@EnableWebSecurity
 	@Configuration(proxyBeanMethods = false)
 	static class AuthorizationServerConfigurationCustomPasswordEncoder extends AuthorizationServerConfiguration {
+
 		@Override
 		PasswordEncoder passwordEncoder() {
 			return PasswordEncoderFactories.createDelegatingPasswordEncoder();
 		}
+
 	}
 
 	@EnableWebSecurity
 	@Configuration(proxyBeanMethods = false)
 	static class AuthorizationServerConfigurationCustomClientAuthentication extends AuthorizationServerConfiguration {
+
 		// @formatter:off
 		@Bean
 		public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
@@ -500,12 +592,25 @@ public class OAuth2ClientCredentialsGrantTests {
 		private AuthenticationSuccessHandler authenticationSuccessHandler() {
 			return new AuthenticationSuccessHandler() {
 				@Override
-				public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response, Authentication authentication) throws IOException, ServletException {
-					org.springframework.security.core.context.SecurityContext securityContext = SecurityContextHolder.createEmptyContext();
+				public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
+						Authentication authentication) throws IOException, ServletException {
+					org.springframework.security.core.context.SecurityContext securityContext = SecurityContextHolder
+						.createEmptyContext();
 					securityContext.setAuthentication(authentication);
 					SecurityContextHolder.setContext(securityContext);
 				}
 			};
+		}
+
+	}
+
+	@EnableWebSecurity
+	@Import(OAuth2AuthorizationServerConfiguration.class)
+	static class AuthorizationServerConfigurationWithMultipleIssuersAllowed extends AuthorizationServerConfiguration {
+
+		@Bean
+		AuthorizationServerSettings authorizationServerSettings() {
+			return AuthorizationServerSettings.builder().multipleIssuersAllowed(true).build();
 		}
 
 	}
